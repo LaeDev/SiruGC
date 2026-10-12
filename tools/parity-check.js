@@ -59,7 +59,7 @@ function snapshot() {
 
 (async () => {
   const state = path.join(os.tmpdir(), `par-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '200' }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio', '--hide-scrollbars',
     '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', 'about:blank'], { stdio: 'ignore' });
@@ -95,6 +95,7 @@ function snapshot() {
       await new Promise((r) => guest.on('open', r));
       guest.send(JSON.stringify({ t: 'join', name: '지나가던 코끼리', cid: 'guest-cid-000001', color: '#6ee7a8' })); await wait(400);
       for (const t of ['안녕하세요! 오늘 같이 볼 영상 올릴게요', '조회수 1,234,567,890회짜리 영상인데 제목이 아주아주아주아주 길어요']) { guest.send(JSON.stringify({ t: 'chat', text: t })); await wait(400); }
+      await wait(600); // 마지막 채팅이 화면에 그려질 시간
       await snap('2 방 - 채팅 탭');
       for (const [tab, label] of [['queue', '3 방 - 대기열 탭'], ['users', '4 방 - 참가자 탭'], ['dm', '5 방 - 쪽지 탭']]) {
         if (!(await js(`!!document.querySelector('#tab-${tab}')`))) continue;
@@ -106,7 +107,7 @@ function snapshot() {
       await js(`document.querySelector('#settingsBtn').click()`); await snap('7 설정 창');
       await js(`document.querySelector('#settings').close()`);
       guest.close();
-      await raw('Target.closeTarget', { targetId });
+      await raw('Target.closeTarget', { targetId }); await wait(700); // 이전 프로필의 접속이 정리될 시간
     }
     browser.close();
   } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }

@@ -15,9 +15,10 @@ function applyTheme(id) {
   set('theme', id);
   syncThemeColor();
 }
+function markThemeCard() { document.querySelectorAll('#themeGrid .tc').forEach((c) => c.classList.toggle('sel', c.querySelector('input').checked)); }
 function themeCard(id, name, desc) {
   const card = el('label', { className: 'tc' },
-    el('input', { type: 'radio', name: 'theme', value: id, checked: (get('theme') || 'auto') === id, onchange: () => applyTheme(id) }),
+    el('input', { type: 'radio', name: 'theme', value: id, checked: (get('theme') || 'auto') === id, onchange: () => { applyTheme(id); markThemeCard(); } }),
     el('span', { className: 'tc-p' }, el('i'), el('i'), el('i')),
     el('span', { className: 'tc-n', textContent: name }));
   if (id !== 'auto') card.dataset.theme = id; // 카드 자체를 그 테마의 색으로 그려서 미리보기로 쓴다
@@ -31,9 +32,20 @@ function themeCard(id, name, desc) {
     grid.append(el('h4', { textContent: group }), el('div', { className: 'tgroup' }, ...list.map(([id, name]) => themeCard(id, name))));
   }
 }
+markThemeCard();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', syncThemeColor);
 syncThemeColor();
 
 // ---- 창 열고 닫기 ----
-$('#settingsBtn').onclick = $('#joinSettings').onclick = () => settingsDlg.showModal();
-settingsDlg.addEventListener('click', (e) => { if (e.target === settingsDlg) settingsDlg.close(); }); // 바깥을 누르면 닫힘
+// <dialog>를 지원하지 않는 구형 브라우저(iOS 15.4 미만, 일부 앱 안 브라우저)에서도 열리고 닫히게 한다
+function openSettings() {
+  if (typeof settingsDlg.showModal === 'function') settingsDlg.showModal();
+  else { settingsDlg.setAttribute('open', ''); settingsDlg.classList.add('fallback'); }
+}
+function closeSettings() {
+  if (typeof settingsDlg.close === 'function') settingsDlg.close(); else settingsDlg.removeAttribute('open');
+}
+$('#settingsBtn').onclick = $('#joinSettings').onclick = openSettings;
+$('#setClose').onclick = (e) => { e.preventDefault(); closeSettings(); }; // form method=dialog를 모르는 브라우저에서 페이지가 이동하지 않게
+settingsDlg.addEventListener('click', (e) => { if (e.target === settingsDlg) closeSettings(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsDlg.classList.contains('fallback') && settingsDlg.hasAttribute('open')) closeSettings(); }); // 바깥을 누르면 닫힘

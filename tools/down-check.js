@@ -50,8 +50,8 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await A.js(`!!mic && !!localStream`), '종료 전: 마이크와 화면 공유가 켜져 있음');
 
     srv.kill();
-    const t = await until(A, `document.querySelector('.end h1')?.textContent === '서버가 꺼졌습니다'`, 5000);
-    check(t >= 0 && t < 2000, `안내 페이지가 바로 뜸 (${t}ms)`);
+    const t = await until(A, `document.querySelector('.end h1')?.textContent === '서버가 꺼졌습니다'`, 25000);
+    check(t >= 11000 && t < 22000, `서버가 12초 넘게 응답하지 않으면 안내 페이지가 뜸 (${t}ms). 잠깐 끊긴 폰에는 뜨지 않도록 일부러 늦춤`);
     check(await A.js(`document.body.innerText.includes('다음에 다시 돌아와주세요!')`), '"다음에 다시 돌아와주세요!" 문구');
     check(await A.js(`mic === null && localStream === null && vpcs.size === 0 && pcs.size === 0`), '마이크·화면 공유·연결이 모두 정리됨');
     check(await A.js(`document.title === '서버가 꺼졌습니다'`), '탭 제목도 바뀜');
@@ -62,6 +62,26 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(back >= 0, `다시 켜진 것을 알려 줌 (${back}ms)`);
     await A.js(`document.querySelector('.end .btn').click()`); await wait(1500);
     check(await A.js(`!!document.querySelector('#joinForm')`), '"다시 연결해 보기"로 입장 화면으로 돌아옴');
+
+    console.log('서버는 켜져 있는데 연결만 끊긴 경우 (이 경우 "서버가 꺼졌습니다"가 뜨면 안 됨)');
+    const obs = new WebSocket(`ws://localhost:${PORT}`); const seen = [];
+    obs.on('message', (d) => seen.push(JSON.parse(d)));
+    await new Promise((r) => obs.on('open', r));
+    obs.send(JSON.stringify({ t: 'join', name: '관찰자', cid: 'observer-cid-0001' })); await wait(300);
+    const C = await page();
+    await C.js(`document.querySelector('#voiceBtn').click()`); await wait(900);
+    const idBefore = await C.js(`me`); seen.length = 0;
+    await C.js(`ws.close()`); // 연결만 끊는다 (서버는 그대로)
+    check(await until(C, `reconnecting === false && !!document.querySelector('#app') && !document.querySelector('.end')`, 8000) >= 0, '서버가 살아 있으면 안내 페이지 없이 다시 연결됨');
+    check(await C.js(`me === '${idBefore}' && !!mic && mic.getAudioTracks()[0].enabled`), '같은 세션을 이어받음 (내 id 그대로, 마이크도 켜진 채)');
+    await wait(500);
+    check(!seen.some((m) => m.t === 'user-leave' || m.t === 'user-join'), '다른 사람에게는 나갔다 들어온 알림이 가지 않음');
+    check(await C.js(`document.querySelector('#net').hidden`), '연결되면 안내 띠가 사라짐');
+    // 죽은 연결(소리 없이 끊김): 40초 동안 아무 소식이 없으면 앱이 스스로 알아채고 다시 연결한다
+    await C.js(`lastHeard = Date.now() - 41000; hbCheck()`);
+    check(await until(C, `reconnecting === false && joined && ws.readyState === 1`, 8000) >= 0 && (await C.js(`me === '${idBefore}'`)), '죽은 연결도 스스로 알아채고 같은 세션으로 다시 연결');
+    check(await C.js(`!!document.querySelector('#chat')`) && !seen.some((m) => m.t === 'user-leave'), '이번에도 깜빡임 없음');
+    obs.close();
 
     console.log('서버가 정상 종료 알림(shutdown)을 보낸 경우');
     const B = await page();

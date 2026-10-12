@@ -31,6 +31,13 @@
   <symbol id="i-skip" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></symbol>
+  <symbol id="i-tablet" viewBox="0 0 24 24"><rect width="16" height="20" x="4" y="2" rx="2"/><line x1="12" x2="12.01" y1="18" y2="18"/></symbol>
+  <symbol id="i-smartphone" viewBox="0 0 24 24"><rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
   <symbol id="i-mic-off" viewBox="0 0 24 24"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
@@ -41,6 +48,7 @@
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
   <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
   <symbol id="i-tv" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="5" rx="2"/><path d="m10 9 5 3-5 3z"/><path d="M8 21h8"/></symbol>
 </svg>
 <a class="skip" href="#chatIn">채팅 입력으로 건너뛰기</a>
@@ -145,6 +153,8 @@
       <span class="badge" id="screenBadge"></span>
       <button class="btn primary retry" id="retryShare" type="button" hidden>다시 연결</button>
     </div>
+
+    <div class="vbar" id="voiceBar" role="list" aria-label="음성 대화 중인 사람" hidden></div>
   </main>
 
   <aside class="side" aria-label="채팅과 참가자">
@@ -158,6 +168,8 @@
     <section class="panel" id="p-chat" role="tabpanel" aria-labelledby="tab-chat">
       <div class="chat scroll" id="chat" role="log" aria-live="polite" aria-label="채팅 메시지"></div>
       <form class="send" id="chatForm">
+        <button class="btn icon" type="button" id="attachBtn" aria-label="사진·동영상 첨부" title="사진·동영상 첨부"><svg class="i"><use href="#i-clip"/></svg></button>
+        <input type="file" id="attachFile" accept="image/*,video/mp4,video/webm,video/quicktime" hidden>
         <label class="sr" for="chatIn">메시지</label>
         <input type="text" id="chatIn" placeholder="메시지를 입력하세요" maxlength="500" autocomplete="off">
         <button class="btn primary" type="submit" aria-label="보내기"><svg class="i"><use href="#i-send"/></svg></button>
@@ -190,16 +202,30 @@
     </section>
     <section class="panel" id="p-dm" role="tabpanel" aria-labelledby="tab-dm" hidden>
       <div class="scroll" id="dmListWrap">
+        <div class="dm-top"><button class="btn sm" id="dmNew" type="button"><svg class="i"><use href="#i-plus"/></svg>새 쪽지</button></div>
         <ul class="convs" id="dmList"></ul>
         <p class="hint" id="dmEmpty">아직 쪽지가 없어요. 참가자 탭에서 사람을 눌러 쪽지를 보내 보세요.</p>
+      </div>
+      <div class="thread" id="dmPicker" hidden>
+        <header class="thr-h">
+          <button class="btn icon" id="pkBack" type="button" aria-label="쪽지 목록으로" title="쪽지 목록으로"><svg class="i"><use href="#i-back"/></svg></button>
+          <label class="sr" for="pkSearch">이름으로 찾기</label>
+          <input type="search" id="pkSearch" placeholder="이름으로 찾기" autocomplete="off">
+        </header>
+        <div class="scroll"><ul class="convs" id="pkList"></ul><p class="hint" id="pkEmpty" hidden></p></div>
       </div>
       <div class="thread" id="dmThread" hidden>
         <header class="thr-h">
           <button class="btn icon" id="dmBack" type="button" aria-label="쪽지 목록으로" title="쪽지 목록으로"><svg class="i"><use href="#i-back"/></svg></button>
           <span id="dmWho" class="thr-who"></span>
+          <button class="btn icon" id="dmClear" type="button" aria-label="대화 정리하기" title="내 화면에서 이 대화 지우기"><svg class="i"><use href="#i-trash"/></svg></button>
+          <button class="btn icon" id="dmBlock" type="button" aria-label="이 사람 차단" title="이 사람 차단"><svg class="i"><use href="#i-ban"/></svg></button>
         </header>
+        <p class="note blk" id="dmBlockedNote" hidden>차단한 사람이에요. 이 사람의 쪽지는 오지 않고, 쪽지도 보낼 수 없어요. 위의 차단 버튼을 다시 누르면 풀려요.</p>
         <div class="chat scroll" id="dmMsgs" role="log" aria-label="쪽지 내용"></div>
         <form class="send" id="dmForm">
+          <button class="btn icon" type="button" id="dmAttachBtn" aria-label="쪽지에 사진·동영상 첨부" title="사진·동영상 첨부"><svg class="i"><use href="#i-clip"/></svg></button>
+          <input type="file" id="dmAttachFile" accept="image/*,video/mp4,video/webm,video/quicktime" hidden>
           <label class="sr" for="dmIn">쪽지 내용</label>
           <input type="text" id="dmIn" placeholder="쪽지를 입력하세요" maxlength="500" autocomplete="off">
           <button class="btn primary" type="submit" aria-label="쪽지 보내기"><svg class="i"><use href="#i-send"/></svg></button>
@@ -208,6 +234,11 @@
     </section>
   </aside>
 </div>
+
+<dialog id="lightbox" class="lb" aria-label="사진 크게 보기"><img id="lbImg" alt="크게 본 사진"></dialog>
+
+<!-- 연결이 끊겼을 때 잠깐 보이는 안내 띠 -->
+<div id="net" role="status" aria-live="polite" hidden></div>
 
 <!-- 화면 보호기 (패닉 버튼): 켜져 있는 동안 뒤의 화면은 조작할 수 없다 -->
 <div id="saver" role="img" aria-label="화면 보호기. 아무 키나 누르거나 화면을 누르면 돌아가요" hidden>
@@ -219,12 +250,28 @@
   <form method="dialog" class="dlg-in">
     <header class="dlg-h">
       <h2 id="setTitle">설정</h2>
-      <button class="btn icon" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button>
+      <button class="btn icon" id="setClose" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button>
     </header>
     <div class="dlg-b">
       <section aria-labelledby="hTheme">
         <h3 id="hTheme">테마</h3>
         <div id="themeGrid"></div>
+      </section>
+      <section aria-labelledby="hLayout">
+        <h3 id="hLayout">채팅 화면</h3>
+        <label class="field"><span>채팅 글자 크기 <output id="chatSizeOut" for="chatSize">보통</output></span><input type="range" id="chatSize" min="0" max="3" step="1" value="1"></label>
+        <p class="note">영상과 채팅 사이의 선(폰에서는 손잡이)을 끌면 채팅 너비(폰에서는 영상 높이)를 바꿀 수 있어요. 키보드로는 선을 선택하고 방향키를 누르세요. 두 번 누르면 원래대로 돌아가요.</p>
+        <div><button type="button" class="btn" id="layoutReset">크기 모두 되돌리기</button></div>
+      </section>
+      <section aria-labelledby="hVoice">
+        <h3 id="hVoice">음성</h3>
+        <label class="field"><span>목소리 필터</span><select id="vfSel"></select></label>
+        <label class="field"><span>마이크 입력 크기 <output id="micGainOut" for="micGain">100%</output></span><input type="range" id="micGain" min="0" max="200" step="5" value="100"></label>
+        <label class="chk"><input type="checkbox" id="nsOn"><span>잡음 억제</span></label>
+        <label class="chk"><input type="checkbox" id="ecOn"><span>에코 제거</span></label>
+        <label class="chk"><input type="checkbox" id="agcOn"><span>자동 음량 조절</span></label>
+        <label class="chk"><input type="checkbox" id="monOn"><span>내 목소리 들어 보기 (이어폰을 끼세요)</span></label>
+        <p class="note">필터와 입력 크기는 다른 사람에게 들리는 내 목소리에 적용돼요. 음성에 참가한 뒤에도 바꿀 수 있어요. 다른 사람의 목소리 크기는 참가자 탭에서 그 사람을 눌러 조절해요.</p>
       </section>
       <section aria-labelledby="hNotif">
         <h3 id="hNotif">알림</h3>
@@ -253,6 +300,7 @@
       <section aria-labelledby="hRoom">
         <h3 id="hRoom">방</h3>
         <button type="button" class="btn" id="copy"><svg class="i"><use href="#i-link"/></svg>방 링크 복사</button>
+        <p class="note" id="verNote"></p>
       </section>
     </div>
   </form>
@@ -262,9 +310,11 @@
 <script src="/media.js"></script>
 <script src="/voice.js"></script>
 <script src="/settings.js"></script>
+<script src="/layout.js"></script>
 <script src="/pwa.js"></script>
 <script src="/dm.js"></script>
 <script src="/notify.js"></script>
 <script src="/panic.js"></script>
+<script src="/attach.js"></script>
 </body>
 </html>
