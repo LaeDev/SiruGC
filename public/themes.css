@@ -1,0 +1,93 @@
+/* 테마: 앱의 색은 모두 이 토큰으로만 정해진다. <html data-theme="이름">으로 고르고, 없으면 기기의 라이트/다크 설정을 따른다.
+   색상 출처: Catppuccin(Mocha/Latte)·Nord·Solarized·Gruvbox·Rosé Pine·Dracula는 각 공식 팔레트 값,
+   Tokyo Night는 공식 bg #1a1b26 / bg_dark #16161e 만 확인했고 나머지는 같은 계열로 맞춤.
+   글자/배경 쌍은 tools/check-contrast.js 로 WCAG AA(4.5:1)를 검사한다. 기준에 못 미친 값은 팔레트에서 살짝 조정했다.
+   --accent: 채움(버튼·배지)  --accent-text: 글자·선·아이콘  --on-accent: 채움 위의 글자 */
+
+/* 기기 설정이 라이트이고 사용자가 따로 고르지 않았을 때 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg:#f6f2ff; --surface:#ffffff; --surface-2:#ebe5fb; --line:#cfc4ea;
+    --text:#1e1636; --muted:#5b4f80; --accent:#ffb84d; --on-accent:#2a1b05; --accent-text:#8a4b00;
+    --danger:#b3263a; --focus:#5b3df5; color-scheme:light;
+    --ok:#15803d; --on-ok:#ffffff; --info:#1d4ed8; --on-info:#ffffff; --on-danger:#ffffff;
+  }
+}
+
+[data-theme="lamp-dark"] {
+  --bg:#1b1530; --surface:#251d42; --surface-2:#30265a; --line:#463a74;
+  --text:#f4f0ff; --muted:#b5abd9; --accent:#ffb84d; --on-accent:#2a1b05; --accent-text:#ffb84d;
+  --danger:#ff8a98; --focus:#ffe0a3; color-scheme:dark;
+}
+[data-theme="lamp-light"] {
+  --bg:#f6f2ff; --surface:#ffffff; --surface-2:#ebe5fb; --line:#cfc4ea;
+  --text:#1e1636; --muted:#5b4f80; --accent:#ffb84d; --on-accent:#2a1b05; --accent-text:#8a4b00;
+  --danger:#b3263a; --focus:#5b3df5; color-scheme:light;
+}
+
+[data-theme="dracula"] {
+  --bg:#282a36; --surface:#343746; --surface-2:#44475a; --line:#6272a4;
+  --text:#f8f8f2; --muted:#c3c6dc; --accent:#bd93f9; --on-accent:#1e1f29; --accent-text:#bd93f9;
+  --danger:#ff7a7a; --focus:#8be9fd; color-scheme:dark;
+}
+[data-theme="nord"] {
+  --bg:#2e3440; --surface:#3b4252; --surface-2:#434c5e; --line:#4c566a;
+  --text:#eceff4; --muted:#c9d1e0; --accent:#88c0d0; --on-accent:#2e3440; --accent-text:#88c0d0;
+  --danger:#f0a3a9; --focus:#ebcb8b; color-scheme:dark;
+}
+[data-theme="nord-light"] {
+  --bg:#e5e9f0; --surface:#eceff4; --surface-2:#d8dee9; --line:#b9c3d6;
+  --text:#2e3440; --muted:#4c566a; --accent:#88c0d0; --on-accent:#2e3440; --accent-text:#3d6488;
+  --danger:#a53b45; --focus:#5e81ac; color-scheme:light;
+}
+[data-theme="solarized-dark"] {
+  --bg:#002b36; --surface:#073642; --surface-2:#0e4655; --line:#2d6270;
+  --text:#eee8d5; --muted:#a8b5b5; --accent:#2aa198; --on-accent:#002b36; --accent-text:#3fc1b6;
+  --danger:#f2706b; --focus:#d9a400; color-scheme:dark;
+}
+[data-theme="solarized-light"] {
+  --bg:#fdf6e3; --surface:#eee8d5; --surface-2:#e4dcc3; --line:#c4bb9f;
+  --text:#073642; --muted:#465b62; --accent:#b58900; --on-accent:#002b36; --accent-text:#7a5c00;
+  --danger:#b3201f; --focus:#268bd2; color-scheme:light;
+}
+[data-theme="gruvbox-dark"] {
+  --bg:#282828; --surface:#3c3836; --surface-2:#504945; --line:#665c54;
+  --text:#ebdbb2; --muted:#d5c4a1; --accent:#fabd2f; --on-accent:#282828; --accent-text:#fabd2f;
+  --danger:#ff8070; --focus:#83a598; color-scheme:dark;
+}
+[data-theme="gruvbox-light"] {
+  --bg:#fbf1c7; --surface:#ebdbb2; --surface-2:#d5c4a1; --line:#bdae93;
+  --text:#3c3836; --muted:#4f463f; --accent:#d79921; --on-accent:#282828; --accent-text:#7c4a00;
+  --danger:#9d0006; --focus:#076678; color-scheme:light;
+}
+[data-theme="catppuccin-mocha"] {
+  --bg:#181825; --surface:#1e1e2e; --surface-2:#313244; --line:#45475a;
+  --text:#cdd6f4; --muted:#a6adc8; --accent:#cba6f7; --on-accent:#1e1e2e; --accent-text:#cba6f7;
+  --danger:#f38ba8; --focus:#89b4fa; color-scheme:dark;
+}
+[data-theme="catppuccin-latte"] {
+  --bg:#eff1f5; --surface:#e6e9ef; --surface-2:#ccd0da; --line:#bcc0cc;
+  --text:#4c4f69; --muted:#484b61; --accent:#8839ef; --on-accent:#eff1f5; --accent-text:#7a2ce0;
+  --danger:#bf0d34; --focus:#1e66f5; color-scheme:light;
+}
+[data-theme="tokyo-night"] {
+  --bg:#16161e; --surface:#1a1b26; --surface-2:#292e42; --line:#3b4261;
+  --text:#c0caf5; --muted:#a9b1d6; --accent:#7aa2f7; --on-accent:#16161e; --accent-text:#7aa2f7;
+  --danger:#f7768e; --focus:#7dcfff; color-scheme:dark;
+}
+[data-theme="rose-pine"] {
+  --bg:#191724; --surface:#1f1d2e; --surface-2:#26233a; --line:#403d52;
+  --text:#e0def4; --muted:#a09cba; --accent:#c4a7e7; --on-accent:#191724; --accent-text:#c4a7e7;
+  --danger:#eb6f92; --focus:#9ccfd8; color-scheme:dark;
+}
+[data-theme="rose-pine-dawn"] {
+  --bg:#faf4ed; --surface:#fffaf3; --surface-2:#f2e9e1; --line:#d8d0cb;
+  --text:#464261; --muted:#625e7a; --accent:#d7827e; --on-accent:#2b2536; --accent-text:#8e4457;
+  --danger:#a03656; --focus:#286983; color-scheme:light;
+}
+
+/* 라이트 테마 공통 의미색: 밝은 배경에서도 구분되도록 진한 초록/파랑 + 흰 글자 (다크 테마는 style.css의 밝은 값을 그대로 씀) */
+[data-theme="lamp-light"], [data-theme="nord-light"], [data-theme="solarized-light"],
+[data-theme="gruvbox-light"], [data-theme="catppuccin-latte"], [data-theme="rose-pine-dawn"] {
+  --ok:#15803d; --on-ok:#ffffff; --info:#1d4ed8; --on-info:#ffffff; --on-danger:#ffffff;
+}

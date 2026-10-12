@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#1b1530">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="SiruGC">
+<script>try{var t=localStorage.getItem('theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t}catch(e){}</script>
+<title>방 채팅</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600&family=Jua&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/themes.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24"><path d="m9 10 3-3 3 3"/><path d="M12 13V7"/><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="2"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-skip" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+  <symbol id="i-mic-off" viewBox="0 0 24 24"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+  <symbol id="i-phone-off" viewBox="0 0 24 24"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="22" x2="2" y1="2" y2="22"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></symbol>
+  <symbol id="i-volume-x" viewBox="0 0 24 24"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+  <symbol id="i-tv" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="5" rx="2"/><path d="m10 9 5 3-5 3z"/><path d="M8 21h8"/></symbol>
+</svg>
+<a class="skip" href="#chatIn">채팅 입력으로 건너뛰기</a>
+
+<!-- ===== 입장: 캐릭터 메이커 ===== -->
+<main class="join" id="join">
+  <button type="button" class="btn join-set" id="joinSettings" aria-haspopup="dialog"><svg class="i"><use href="#i-sliders"/></svg>테마·설정</button>
+  <form class="maker" id="joinForm" novalidate>
+    <div class="me">
+      <div>
+        <h1>방 채팅</h1>
+        <p class="lede">같이 영상을 보고 이야기하는 방이에요. 먼저 나를 꾸며 보세요.</p>
+      </div>
+      <span class="av xl" id="preview" role="img" aria-label="내 아바타 미리보기"></span>
+      <label class="field"><span>닉네임</span>
+        <input type="text" id="nameIn" maxlength="20" autocomplete="nickname" placeholder="최대 20자" required>
+      </label>
+      <p class="msg-err" id="joinMsg" role="alert"></p>
+    </div>
+
+    <div class="make">
+      <div>
+        <div class="tabs" role="tablist" aria-label="아바타 만드는 방법">
+          <button type="button" role="tab" id="tabEmoji" aria-controls="panEmoji" aria-selected="true">이모티콘</button>
+          <button type="button" role="tab" id="tabPhoto" aria-controls="panPhoto" aria-selected="false" tabindex="-1">사진</button>
+        </div>
+      </div>
+
+      <div id="panEmoji" role="tabpanel" aria-labelledby="tabEmoji">
+        <fieldset>
+          <legend>이모티콘 고르기</legend>
+          <div class="emojis" id="emojis"></div>
+          <div class="own-emoji">
+            <label class="field"><span>직접 입력</span>
+              <input type="text" id="emojiIn" aria-describedby="emojiHint" autocomplete="off" inputmode="text">
+            </label>
+            <small id="emojiHint">이모티콘 하나를 붙여 넣거나 입력하세요.</small>
+          </div>
+        </fieldset>
+      </div>
+
+      <div id="panPhoto" role="tabpanel" aria-labelledby="tabPhoto" hidden>
+        <fieldset>
+          <legend>내 사진</legend>
+          <div class="photo">
+            <button type="button" class="btn" id="photoBtn"><svg class="i"><use href="#i-upload"/></svg>사진 선택</button>
+            <button type="button" class="btn danger" id="photoClear" hidden>사진 지우기</button>
+            <small id="photoHint">가운데를 정사각형으로 잘라 사용해요.</small>
+            <input type="file" id="photoFile" accept="image/*" hidden>
+          </div>
+        </fieldset>
+      </div>
+
+      <fieldset>
+        <legend>내 색 <span class="sr">(이모티콘 배경, 프로필 테두리, 채팅 말풍선 띠에 쓰여요)</span></legend>
+        <div class="swatches" id="swatches">
+          <div class="picker">
+            <input type="color" id="colorIn">
+            <label for="colorIn">직접 고르기</label>
+            <output id="colorHex" for="colorIn"></output>
+          </div>
+        </div>
+      </fieldset>
+    </div>
+    <button class="btn primary enter" id="enter" type="submit">입장하기</button>
+  </form>
+</main>
+
+<!-- ===== 방 ===== -->
+<div class="app" id="app" hidden>
+  <header class="top">
+    <div class="logo"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span class="t">방 채팅</span></div>
+    <div class="top-media">
+      <button class="btn go" id="voiceBtn" type="button" aria-pressed="false" aria-label="음성 대화에 참가"><svg class="i" id="voiceIcon"><use href="#i-mic"/></svg><span class="lbl" id="voiceLbl">음성 참가</span></button>
+      <button class="btn go" id="micBtn" type="button" aria-pressed="false" aria-label="마이크 끄기" hidden><svg class="i" id="micIcon"><use href="#i-mic"/></svg><span class="lbl" id="micLbl">마이크 끄기</span></button>
+      <button class="btn blue" id="shareBtn" type="button"><svg class="i" id="shareIcon"><use href="#i-screen"/></svg><span class="lbl" id="shareLbl">화면 공유</span></button>
+    </div>
+    <div class="top-util">
+      <button class="btn icon" id="soundBtn" type="button" aria-pressed="false" aria-label="모든 소리 끄기" title="모든 소리 끄기"><svg class="i" id="soundIcon"><use href="#i-volume"/></svg></button>
+      <button class="btn icon stop" id="panicBtn" type="button" aria-label="패닉: 소리를 끄고 화면 보호기 켜기" title="패닉: 소리 끄고 화면 보호기 (Esc 두 번)"><svg class="i"><use href="#i-eye-off"/></svg></button>
+      <button class="btn icon" id="settingsBtn" type="button" aria-haspopup="dialog" aria-label="설정" title="설정"><svg class="i"><use href="#i-sliders"/></svg></button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="seg" id="seg" role="group" aria-label="보는 화면" hidden>
+      <button type="button" id="segYt" aria-pressed="true">영상</button>
+      <button type="button" id="segScreen" aria-pressed="false">공유 화면</button>
+    </div>
+
+    <div class="empty" id="empty">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tv"/></svg>
+      <div>
+        <h2>아직 틀어 둔 게 없어요</h2>
+        <p>대기열 탭에 유튜브 링크를 올리면 모두 같은 장면을 봐요. 내 화면을 공유할 수도 있어요.</p>
+      </div>
+    </div>
+
+    <div class="frame" id="ytWrap" hidden><div id="ytplayer"></div></div>
+    <div class="frame" id="screenWrap" hidden>
+      <video id="screen" autoplay playsinline controls></video>
+      <span class="badge" id="screenBadge"></span>
+      <button class="btn primary retry" id="retryShare" type="button" hidden>다시 연결</button>
+    </div>
+  </main>
+
+  <aside class="side" aria-label="채팅과 참가자">
+    <div class="stabs" role="tablist" aria-label="패널">
+      <button type="button" role="tab" id="tab-chat" aria-controls="p-chat" aria-selected="true">채팅<span class="dot" id="dot-chat" hidden></span></button>
+      <button type="button" role="tab" id="tab-queue" aria-controls="p-queue" aria-selected="false" tabindex="-1">대기열<span class="dot" id="dot-queue" hidden></span></button>
+      <button type="button" role="tab" id="tab-users" aria-controls="p-users" aria-selected="false" tabindex="-1">참가자<span class="dot soft" id="dot-users"></span></button>
+      <button type="button" role="tab" id="tab-dm" aria-controls="p-dm" aria-selected="false" tabindex="-1">쪽지<span class="dot" id="dot-dm" hidden></span></button>
+    </div>
+
+    <section class="panel" id="p-chat" role="tabpanel" aria-labelledby="tab-chat">
+      <div class="chat scroll" id="chat" role="log" aria-live="polite" aria-label="채팅 메시지"></div>
+      <form class="send" id="chatForm">
+        <label class="sr" for="chatIn">메시지</label>
+        <input type="text" id="chatIn" placeholder="메시지를 입력하세요" maxlength="500" autocomplete="off">
+        <button class="btn primary" type="submit" aria-label="보내기"><svg class="i"><use href="#i-send"/></svg></button>
+      </form>
+    </section>
+
+    <section class="panel" id="p-queue" role="tabpanel" aria-labelledby="tab-queue" hidden>
+      <form class="qadd" id="qForm">
+        <label class="sr" for="qUrl">유튜브 링크</label>
+        <input type="text" id="qUrl" placeholder="유튜브 링크나 영상 ID" autocomplete="off">
+        <button class="btn primary" type="submit"><svg class="i"><use href="#i-plus"/></svg><span class="lbl">추가</span></button>
+      </form>
+      <p class="qmsg" id="qMsg" role="alert"></p>
+      <div class="scroll">
+        <div class="now" id="now" hidden>
+          <img class="thumb" id="nowThumb" alt="" width="96" height="54">
+          <div class="qt"><b id="nowTitle"></b><small id="nowBy"></small></div>
+          <button class="btn icon" id="nowSkip" type="button" aria-label="건너뛰기" title="건너뛰기"><svg class="i"><use href="#i-skip"/></svg></button>
+        </div>
+        <ul class="qlist" id="qList"></ul>
+        <p class="hint" id="qEmpty">대기열이 비어 있어요. 같이 볼 영상을 추가해 보세요.</p>
+      </div>
+    </section>
+
+    <section class="panel" id="p-users" role="tabpanel" aria-labelledby="tab-users" hidden>
+      <div class="scroll">
+        <ul class="users" id="users"></ul>
+        <details class="bans" id="banBox" hidden><summary>차단 목록</summary><ul id="bans"></ul></details>
+      </div>
+    </section>
+    <section class="panel" id="p-dm" role="tabpanel" aria-labelledby="tab-dm" hidden>
+      <div class="scroll" id="dmListWrap">
+        <ul class="convs" id="dmList"></ul>
+        <p class="hint" id="dmEmpty">아직 쪽지가 없어요. 참가자 탭에서 사람을 눌러 쪽지를 보내 보세요.</p>
+      </div>
+      <div class="thread" id="dmThread" hidden>
+        <header class="thr-h">
+          <button class="btn icon" id="dmBack" type="button" aria-label="쪽지 목록으로" title="쪽지 목록으로"><svg class="i"><use href="#i-back"/></svg></button>
+          <span id="dmWho" class="thr-who"></span>
+        </header>
+        <div class="chat scroll" id="dmMsgs" role="log" aria-label="쪽지 내용"></div>
+        <form class="send" id="dmForm">
+          <label class="sr" for="dmIn">쪽지 내용</label>
+          <input type="text" id="dmIn" placeholder="쪽지를 입력하세요" maxlength="500" autocomplete="off">
+          <button class="btn primary" type="submit" aria-label="쪽지 보내기"><svg class="i"><use href="#i-send"/></svg></button>
+        </form>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<!-- 화면 보호기 (패닉 버튼): 켜져 있는 동안 뒤의 화면은 조작할 수 없다 -->
+<div id="saver" role="img" aria-label="화면 보호기. 아무 키나 누르거나 화면을 누르면 돌아가요" hidden>
+  <canvas id="saverCanvas"></canvas>
+  <div id="saverClock" aria-hidden="true"></div>
+</div>
+
+<dialog id="settings" class="dlg" aria-labelledby="setTitle">
+  <form method="dialog" class="dlg-in">
+    <header class="dlg-h">
+      <h2 id="setTitle">설정</h2>
+      <button class="btn icon" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button>
+    </header>
+    <div class="dlg-b">
+      <section aria-labelledby="hTheme">
+        <h3 id="hTheme">테마</h3>
+        <div id="themeGrid"></div>
+      </section>
+      <section aria-labelledby="hNotif">
+        <h3 id="hNotif">알림</h3>
+        <label class="chk"><input type="checkbox" id="pushOn"><span>이 기기에서 알림 받기</span></label>
+        <p class="note" id="pushNote"></p>
+        <label class="chk"><input type="checkbox" id="dmOn"><span>쪽지가 오면 알림</span></label>
+        <label class="chk"><input type="checkbox" id="dingOn"><span>쪽지가 오면 앱 안에서 소리</span></label>
+        <div><button type="button" class="btn" id="pushTest">테스트 알림 보내기</button></div>
+      </section>
+      <section aria-labelledby="hSpoof">
+        <h3 id="hSpoof">알림 위장</h3>
+        <p class="note">수업 중에 알림이 떠도 눈에 띄지 않게, 알림의 이름·내용·아이콘을 평범한 것으로 바꿔요. 보낸 사람과 쪽지 내용은 알림에 실리지 않아요.</p>
+        <label class="field"><span>위장 방식</span><select id="spoofSel"></select></label>
+        <label class="chk"><input type="checkbox" id="tabSpoof"><span>탭 제목과 아이콘도 같은 걸로 바꾸기</span></label>
+        <div class="spoof-prev" id="spoofPrev" aria-live="polite"></div>
+      </section>
+      <section aria-labelledby="hPanic">
+        <h3 id="hPanic">소리와 패닉</h3>
+        <p class="note">헤더의 스피커 버튼은 영상·공유 화면·음성의 소리를 모두 꺼요. 눈 모양 패닉 버튼(또는 <kbd>Esc</kbd>를 빠르게 두 번)은 소리와 내 마이크를 끄고 화면 보호기를 띄워요. 화면 보호기는 아무 키나 누르면 돌아오고, 소리는 꺼진 채로 남아요.</p>
+      </section>
+      <section aria-labelledby="hApp">
+        <h3 id="hApp">앱으로 설치</h3>
+        <p class="note" id="installNote"></p>
+        <button type="button" class="btn primary" id="installBtn" hidden>앱으로 설치</button>
+      </section>
+      <section aria-labelledby="hRoom">
+        <h3 id="hRoom">방</h3>
+        <button type="button" class="btn" id="copy"><svg class="i"><use href="#i-link"/></svg>방 링크 복사</button>
+      </section>
+    </div>
+  </form>
+</dialog>
+
+<script src="/app.js"></script>
+<script src="/media.js"></script>
+<script src="/voice.js"></script>
+<script src="/settings.js"></script>
+<script src="/pwa.js"></script>
+<script src="/dm.js"></script>
+<script src="/notify.js"></script>
+<script src="/panic.js"></script>
+</body>
+</html>
