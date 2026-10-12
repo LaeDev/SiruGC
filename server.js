@@ -6,6 +6,7 @@ const os = require('os');
 const { WebSocketServer } = require('ws');
 const webpush = require('web-push');
 const createMessages = require('./messages');
+const createUploads = require('./uploads');
 
 // config.env (선택): 한 줄에 KEY=VALUE, #으로 시작하면 주석. 이미 설정된 환경변수가 우선한다.
 // 쉘 이스케이프 문제(특히 윈도우 배치파일에서 JSON)를 피하려고 스크립트가 아니라 서버가 직접 읽는다.
@@ -17,9 +18,18 @@ try {
 } catch {}
 
 const PORT = process.env.PORT || 3000;
+// 연결이 끊긴 사람을 이 시간 동안은 방에 남겨 둔다. 그 안에 돌아오면 같은 세션을 이어받아서(음성·화면 공유·방 상태 유지)
+// 나갔다 들어오는 깜빡임이 없다. 폰은 화면이 꺼지거나 와이파이↔데이터를 갈아탈 때 잠깐씩 끊기기 때문이다.
+const GRACE_MS = Number(process.env.RESUME_GRACE_MS) || 60000; // 폰 화면이 꺼졌다 켜지는 시간까지 버티도록 1분
 const TRUST_PROXY = !!process.env.TRUST_PROXY; // 리버스 프록시 뒤에서만 켤 것 (X-Forwarded-For 신뢰)
 const DB = process.env.STATE_FILE || path.join(__dirname, 'state.json');
 const PUB = path.join(__dirname, 'public');
+// 화면(클라이언트) 파일이 바뀌었는지 알아보는 번호: 서버 시작 때 파일 수정 시각 중 가장 늦은 것.
+// 열어 둔 탭·설치한 앱이 옛 버전이면 접속할 때 서버가 알려 주고, 화면이 새로고침 버튼을 보여 준다.
+const BUILD = (() => {
+  const t = [__filename, ...fs.readdirSync(PUB).map((n) => path.join(PUB, n))].map((p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } });
+  return Math.floor(Math.max(...t)).toString(36);
+})();
 
 // 방은 하나. 호스트 키와 밴 목록만 state.json에 저장한다.
 // 호스트 키를 잃어버렸으면 state.json의 hostKey를 지우고 재시작 → 다음 입장자가 호스트.
@@ -27,13 +37,14 @@ const PUB = path.join(__dirname, 'public');
 const room = {
   hostKey: null, bans: [], clients: new Map(), yt: null, seq: 0, queue: [], sharer: null, voice: new Map(),
   salt: null, vapid: null, members: {}, dms: {}, subs: {}, // 쪽지/알림: 접속한 적 있는 사람, 쪽지, 푸시 구독
+  blocks: {}, cleared: {}, // 차단(내가 막은 사람들), 대화 정리(내 화면에서만 지운 시각)
 };
 try { Object.assign(room, JSON.parse(fs.readFileSync(DB, 'utf8'))); } catch {}
 if (!room.salt) room.salt = crypto.randomBytes(16).toString('hex');       // uid(공개 번호)를 만들 때 쓰는 비밀 소금
 if (!room.vapid) room.vapid = webpush.generateVAPIDKeys();                 // 푸시 서명 키 (개인 키는 서버 밖으로 나가지 않는다)
 
 const save = () => fs.writeFileSync(DB, JSON.stringify({
-  hostKey: room.hostKey, bans: room.bans, salt: room.salt, vapid: room.vapid, members: room.members, dms: room.dms, subs: room.subs,
+  hostKey: room.hostKey, bans: room.bans, salt: room.salt, vapid: room.vapid, members: room.members, dms: room.dms, subs: room.subs, blocks: room.blocks, cleared: room.cleared,
 }));
 let saveTimer = null; // 쪽지처럼 자주 바뀌는 것은 0.3초 모아서 한 번에 쓴다
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; save(); }, 300); };
@@ -56,6 +67,7 @@ const MIME = {
 };
 // public/ 아래 파일만 서빙한다. 확장자 없는 경로는 index.html로 보낸다.
 const server = http.createServer((req, res) => {
+  if (uploads.handle(req, res)) return; // POST /upload, GET /f/<파일>
   // 서버가 살아 있는지 확인하는 주소. 꺼졌다가 돌아왔는지 클라이언트가 이걸로 본다.
   if (req.url === '/healthz') return res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end('ok');
   const av = req.url.match(/^\/a\/([0-9a-f]{12})$/); // 쪽지 목록에서 오프라인인 사람의 프사를 보여 주려고
@@ -70,6 +82,7 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(PUB + path.sep)) return res.writeHead(403).end();
   fs.readFile(file, (err, data) => {
     if (err) return res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
+    if (path.basename(file) === 'index.html') data = Buffer.from(data.toString('utf8').replace('<head>', `<head><meta name="build" content="${BUILD}">`));
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-cache', // 항상 재검증 (서비스 워커가 오프라인 대비를 맡음)
@@ -81,12 +94,16 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
 const send = (ws, msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
 const broadcast = (msg, except) => room.clients.forEach((c) => c !== except && send(c, msg));
-const userOf = (c) => ({ id: c.id, uid: c.uid, name: c.name, avatar: c.avatar, color: c.color, host: c.host });
+const DEVICES = new Set(['pc', 'tablet', 'mobile']); // 참가자 목록에 보이는 기기 종류. 그 밖의 값은 버린다
+const cleanDevice = (d) => (DEVICES.has(d) ? d : null);
+const userOf = (c) => ({ id: c.id, uid: c.uid, name: c.name, avatar: c.avatar, color: c.color, host: c.host, device: c.device || null });
 const banList = () => room.bans.map(({ id, type, label }) => ({ id, type, label })); // IP 값은 노출하지 않음
 const sendBans = () => room.clients.forEach((c) => c.host && send(c, { t: 'bans', bans: banList() }));
 const isBanned = (ip, cid) => room.bans.some((b) => (b.type === 'ip' ? b.value === ip : b.value === cid));
 const newId = (n = 4) => crypto.randomBytes(n).toString('hex');
-const messages = createMessages({ room, send, newId, saveSoon });
+// 사진/동영상 업로드: 세션마다 발급한 토큰이 있어야 올릴 수 있다
+const uploads = createUploads({ findByToken: (t) => (t ? [...room.clients.values()].find((c) => c.uploadToken === t) : null), send });
+const messages = createMessages({ room, send, newId, saveSoon, cleanMedia: uploads.validMedia });
 
 // ---- WebRTC 연결 서버 목록 (화면 공유 / 음성) ----
 // 집 밖 네트워크끼리는 STUN만으로 직접 연결이 안 되는 경우가 많아서 TURN(중계) 서버가 필요하다.
@@ -167,15 +184,39 @@ async function queueAdd(ws, videoId) {
 }
 
 function leave(ws) {
-  if (!room.clients.delete(ws.id)) return;
+  if (room.clients.get(ws.id) !== ws) return; // 이미 다른 소켓이 이 세션을 이어받았으면 무시
+  room.clients.delete(ws.id);
+  clearTimeout(ws.ghostTimer);
   if (room.sharer === ws.id) { room.sharer = null; broadcast({ t: 'share-stop' }); }
   if (room.voice.delete(ws.id)) broadcast(voiceMsg());
   broadcast({ t: 'user-leave', id: ws.id });
   if (!room.clients.size) room.yt = null; // 아무도 없으면 영상 상태 초기화
 }
 
+// 입장(또는 이어받기) 응답. 입장하는 사람 자신은 users에서 뺀다(클라이언트가 me를 더한다).
+function sendJoined(ws, extra = {}) {
+  send(ws, {
+    t: 'joined', me: userOf(ws), hostKey: ws.host ? room.hostKey : undefined, resume: ws.resumeSecret, upload: ws.uploadToken,
+    users: [...room.clients.values()].filter((c) => c.id !== ws.id).map(userOf), yt: ytNow(), queue: queueMsg().queue, sharer: room.sharer,
+    voice: voiceMsg().list, ice: iceServers(),
+    inbox: messages.inboxFor(ws.uid), blocks: messages.blocksOf(ws.uid), vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
+    bans: ws.host ? banList() : undefined, build: BUILD, ...extra,
+  });
+}
+
 function join(ws, m, ip) {
   if (typeof m.cid !== 'string' || m.cid.length < 8 || m.cid.length > 64) return;
+  // 끊겼다가 돌아온 사람: 제한 시간 안에 같은 비밀 값을 가지고 오면 옛 세션을 그대로 이어받는다
+  const old = m.resume && typeof m.resume.id === 'string' ? room.clients.get(m.resume.id) : null;
+  if (old && old.cid === m.cid && typeof m.resume.secret === 'string' && m.resume.secret === old.resumeSecret) {
+    if (!old.host && isBanned(ip, m.cid)) { send(ws, { t: 'banned' }); return ws.close(); }
+    Object.assign(ws, { id: old.id, joined: true, ip, cid: old.cid, uid: old.uid, host: old.host, avatar: old.avatar, color: old.color, name: old.name, device: old.device,
+      visible: true, resumeSecret: old.resumeSecret, uploadToken: old.uploadToken, joinedAt: Date.now() });
+    room.clients.set(ws.id, ws); // 옛 소켓 자리를 새 소켓이 차지한다
+    if (!old.ghost) old.terminate(); // 아직 살아 있다고 믿던 옛 소켓은 정리 (이 자리는 이미 넘어갔으니 나가기 처리는 건너뛴다)
+    clearTimeout(old.ghostTimer); old.ghost = false;
+    return sendJoined(ws, { resumed: true });
+  }
   const created = !room.hostKey; // 맨 처음 들어온 사람이 호스트
   if (created) { room.hostKey = newId(16); save(); }
   const host = created || (typeof m.hostKey === 'string' && m.hostKey === room.hostKey);
@@ -185,18 +226,12 @@ function join(ws, m, ip) {
     return ws.close();
   }
   Object.assign(ws, {
-    id: newId(), joined: true, ip, cid: m.cid, uid: messages.uidOf(m.cid), host, avatar: cleanAvatar(m.avatar), color: cleanColor(m.color),
-    name: String(m.name || '').trim().slice(0, 20) || '익명', visible: true,
+    id: newId(), joined: true, ip, cid: m.cid, uid: messages.uidOf(m.cid), host, avatar: cleanAvatar(m.avatar), color: cleanColor(m.color), device: cleanDevice(m.device),
+    name: String(m.name || '').trim().slice(0, 20) || '익명', visible: true, resumeSecret: newId(16), uploadToken: newId(16), joinedAt: Date.now(),
   });
   messages.remember(ws);
   if (!room.yt && room.queue.length) advance(); // 모두 나간 뒤 남은 대기열이 있으면 첫 입장자부터 이어서 재생
-  send(ws, {
-    t: 'joined', me: userOf(ws), hostKey: host ? room.hostKey : undefined,
-    users: [...room.clients.values()].map(userOf), yt: ytNow(), queue: queueMsg().queue, sharer: room.sharer,
-    voice: voiceMsg().list, ice: iceServers(),
-    inbox: messages.inboxFor(ws.uid), vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
-    bans: host ? banList() : undefined,
-  });
+  sendJoined(ws);
   room.clients.set(ws.id, ws);
   broadcast({ t: 'user-join', user: userOf(ws) }, ws);
 }
@@ -210,27 +245,37 @@ function ban(ws, m) {
   const victims = m.mode === 'ip'
     ? [...room.clients.values()].filter((c) => c.ip === target.ip && !c.host)
     : [target];
-  victims.forEach((v) => { send(v, { t: 'banned', kick: m.mode === 'kick' }); v.close(); });
+  victims.forEach((v) => { v.final = true; send(v, { t: 'banned', kick: m.mode === 'kick' }); v.close(); }); // 밴/강퇴는 바로 내보낸다(유예 없음)
   if (m.mode !== 'kick') { save(); sendBans(); }
 }
 
 wss.on('connection', (ws, req) => {
   const ip = clientIp(req);
-  ws.alive = true;
-  ws.on('pong', () => (ws.alive = true));
-  ws.on('close', () => leave(ws));
+  ws.missed = 0;
+  ws.on('pong', () => (ws.missed = 0));
+  ws.on('close', (code, reason) => {
+    if (!ws.joined || room.clients.get(ws.id) !== ws) return leave(ws); // 입장 전이거나 이어받기로 교체된 소켓
+    console.log(`[연결 끊김] ${ws.name} code=${code}${reason?.length ? ` 사유=${String(reason).slice(0, 60)}` : ''} ${Math.round((Date.now() - ws.joinedAt) / 1000)}초 접속`); // 원인 추적용 (1006 = 비정상 끊김, 4000번대 = 화면 쪽이 스스로 끊음 + 사유)
+    if (ws.final || closing) return leave(ws);
+    ws.ghost = true; ws.visible = false;
+    ws.ghostTimer = setTimeout(() => leave(ws), GRACE_MS);
+  });
   ws.on('message', (data) => {
+    ws.missed = 0; // 무슨 메시지든 왔으면 살아 있는 것
     let m;
     try { m = JSON.parse(data); } catch { return; }
     if (m.t === 'join') return !ws.joined && join(ws, m, ip);
     if (!ws.joined) return;
     switch (m.t) {
+      case 'bye': ws.final = true; leave(ws); ws.close(); break; // 탭을 닫는 등 일부러 나가는 것: 유예 없이 바로 나간다
+      case 'ping': send(ws, { t: 'pong' }); break; // 앱이 직접 보내는 생존 신호 (프록시/모바일 절전에서 죽은 연결을 알아내려고)
       case 'chat': {
         const text = String(m.text || '').trim().slice(0, 500);
+        const media = uploads.validMedia(m.media); // 첨부는 우리가 저장한 파일일 때만 (주소를 마음대로 넣지 못하게)
         const now = Date.now();
-        if (!text || now - (ws.lastChat || 0) < 300) return; // 도배 방지
+        if ((!text && !media) || now - (ws.lastChat || 0) < 300) return; // 도배 방지
         ws.lastChat = now;
-        broadcast({ t: 'chat', id: ws.id, name: ws.name, text, ts: now });
+        broadcast({ t: 'chat', id: ws.id, name: ws.name, text, media: media || undefined, ts: now });
         break;
       }
       case 'queue-add': queueAdd(ws, m.videoId); break;
@@ -238,6 +283,16 @@ wss.on('connection', (ws, req) => {
         const item = room.queue.find((q) => q.qid === m.qid);
         if (!item || !canManage(ws, item.by)) return;
         room.queue = room.queue.filter((q) => q !== item);
+        broadcast(queueMsg());
+        break;
+      }
+      case 'queue-move': { // 순서 바꾸기: 호스트는 모두의 것, 일반 참가자는 자기가 올린 것만. to는 새 위치(0부터), 범위를 벗어나면 맨 앞/맨 뒤로
+        const from = room.queue.findIndex((q) => q.qid === m.qid);
+        if (from < 0 || !canManage(ws, room.queue[from].by) || !Number.isInteger(m.to)) return;
+        const to = Math.max(0, Math.min(room.queue.length - 1, m.to));
+        if (to === from) return;
+        const [item] = room.queue.splice(from, 1);
+        room.queue.splice(to, 0, item);
         broadcast(queueMsg());
         break;
       }
@@ -301,8 +356,8 @@ wss.on('connection', (ws, req) => {
 });
 
 setInterval(() => wss.clients.forEach((ws) => {
-  if (!ws.alive) return ws.terminate();
-  ws.alive = false;
+  if (ws.missed >= 3) return ws.terminate(); // 약 75초 동안 아무 소식이 없을 때만 끊는다 (예전엔 25초라 폰에서 멀쩡한 연결이 끊겼다)
+  ws.missed++;
   ws.ping();
 }), 25000);
 

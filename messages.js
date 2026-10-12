@@ -21,16 +21,21 @@ const SPOOFS = {
 // 푸시 주소는 브라우저 제조사의 푸시 서비스만 허용한다. 아무 주소나 받으면 서버가 남이 정한 주소로 요청을 보내게 된다(SSRF).
 const PUSH_HOST_OK = /(^|\.)(googleapis\.com|mozilla\.com|push\.apple\.com|notify\.windows\.com)$/;
 
-module.exports = function createMessages({ room, send, newId, saveSoon }) {
+module.exports = function createMessages({ room, send, newId, saveSoon, cleanMedia }) {
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://sirugc.kro.kr', room.vapid.publicKey, room.vapid.privateKey);
 
   const uidOf = (cid) => crypto.createHmac('sha256', room.salt).update(cid).digest('hex').slice(0, 12);
   const convKey = (a, b) => [a, b].sort().join('~');
   const clientsOf = (uid) => [...room.clients.values()].filter((c) => c.uid === uid);
-  const pub = ({ id, from, to, text, ts }) => ({ id, from, to, text, ts });
+  const pub = ({ id, from, to, text, media, ts, read }) => ({ id, from, to, text, media, ts, read: !!read });
+  const clearedAt = (uid, peer) => room.cleared[uid + '>' + peer] || 0;
+  // uid가 볼 수 있는 쪽지: 대화를 정리한 시각 이후이고, 차단 때문에 내게 전달되지 않은(drop) 쪽지가 아닌 것
+  const visibleTo = (uid, peer, list) => (list || []).filter((m) => m.ts > clearedAt(uid, peer) && !(m.drop && m.to === uid));
+  const blocksOf = (uid) => room.blocks[uid] || [];
+  const label = (msg) => msg.text || (msg.media?.kind === 'video' ? '(동영상)' : '(사진)'); // 글 없이 첨부만 보낸 쪽지의 미리보기
   const peerInfo = (uid) => {
     const m = room.members[uid];
-    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, online: clientsOf(uid).length > 0 };
+    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, online: clientsOf(uid).some((c) => !c.ghost) }; // 방금 끊겨서 돌아오기를 기다리는 사람(ghost)은 접속 중으로 치지 않는다
   };
 
   // 접속할 때 알려 둔다: 이름·프사·색을 기억해 두면 오프라인인 사람에게도 쪽지를 보낼 수 있다.
@@ -50,8 +55,10 @@ module.exports = function createMessages({ room, send, newId, saveSoon }) {
     for (const [k, list] of Object.entries(room.dms)) {
       const [a, b] = k.split('~');
       if (a !== uid && b !== uid) continue;
-      const last = list[list.length - 1];
-      out.push({ ...peerInfo(a === uid ? b : a), last: { text: last.text, ts: last.ts, mine: last.from === uid }, unread: list.filter((m) => m.to === uid && !m.read).length });
+      const peer = a === uid ? b : a, vis = visibleTo(uid, peer, list);
+      if (!vis.length) continue; // 정리했거나 차단으로 안 보이는 대화는 목록에 올리지 않는다
+      const last = vis[vis.length - 1];
+      out.push({ ...peerInfo(peer), last: { text: label(last), ts: last.ts, mine: last.from === uid }, unread: vis.filter((m) => m.to === uid && !m.read).length, blocked: blocksOf(uid).includes(peer) });
     }
     return out.sort((x, y) => y.last.ts - x.last.ts);
   }
@@ -110,15 +117,19 @@ module.exports = function createMessages({ room, send, newId, saveSoon }) {
   // ---- 쪽지 ----
   function sendDm(ws, m) {
     const text = String(m.text || '').trim().slice(0, 500), to = String(m.to || ''), now = Date.now();
-    if (!text || to === ws.uid || !room.members[to] || now - (ws.lastDm || 0) < 400) return; // 빈 글, 나에게, 모르는 사람, 도배
+    const media = cleanMedia ? cleanMedia(m.media) : null;
+    if ((!text && !media) || to === ws.uid || !room.members[to] || now - (ws.lastDm || 0) < 400) return; // 빈 글, 나에게, 모르는 사람, 도배
+    if (blocksOf(ws.uid).includes(to)) return send(ws, { t: 'dm-error', msg: '차단한 사람에게는 쪽지를 보낼 수 없어요. 차단을 풀어 주세요.' });
     ws.lastDm = now;
-    const msg = { id: newId(), from: ws.uid, to, text, ts: now, read: false };
+    // 상대가 나를 차단했으면: 나에게는 보낸 것처럼 보이지만(차단 사실을 드러내지 않으려고) 상대에게는 전달도 알림도 가지 않는다
+    const dropped = blocksOf(to).includes(ws.uid);
+    const msg = { id: newId(), from: ws.uid, to, text, media: media || undefined, ts: now, read: false, drop: dropped || undefined };
     const list = (room.dms[convKey(ws.uid, to)] ||= []);
     list.push(msg);
     if (list.length > MAX_PER_CONV) list.shift();
     saveSoon();
-    for (const c of room.clients.values()) if (c.uid === to || c.uid === ws.uid) send(c, { t: 'dm', msg: pub(msg), peer: peerInfo(c.uid === ws.uid ? to : ws.uid) });
-    pushTo(to, ws.name, text, ws.uid);
+    for (const c of room.clients.values()) if (c.uid === ws.uid || (c.uid === to && !dropped)) send(c, { t: 'dm', msg: pub(msg), peer: peerInfo(c.uid === ws.uid ? to : ws.uid) });
+    if (!dropped) pushTo(to, ws.name, label(msg), ws.uid);
   }
 
   // 메시지 처리: server.js의 switch에서 모르는 종류를 넘겨 받는다. 처리했으면 true.
@@ -127,14 +138,52 @@ module.exports = function createMessages({ room, send, newId, saveSoon }) {
       case 'dm': sendDm(ws, m); return true;
       case 'dm-history': {
         const peer = String(m.with || '');
-        send(ws, { t: 'dm-thread', with: peer, peer: peerInfo(peer), msgs: (room.dms[convKey(ws.uid, peer)] || []).slice(-100).map(pub) });
+        send(ws, { t: 'dm-thread', with: peer, peer: { ...peerInfo(peer), blocked: blocksOf(ws.uid).includes(peer) }, msgs: visibleTo(ws.uid, peer, room.dms[convKey(ws.uid, peer)]).slice(-100).map(pub) });
         return true;
       }
       case 'dm-read': {
         const peer = String(m.with || '');
-        for (const x of room.dms[convKey(ws.uid, peer)] || []) if (x.to === ws.uid) x.read = true;
+        let newly = 0;
+        for (const x of room.dms[convKey(ws.uid, peer)] || []) if (x.to === ws.uid && !x.read && !x.drop) { x.read = true; newly++; }
         saveSoon();
         for (const c of clientsOf(ws.uid)) if (c !== ws) send(c, { t: 'dm-read', with: peer }); // 내 다른 기기의 안 읽음 표시도 지운다
+        if (newly) for (const c of clientsOf(peer)) send(c, { t: 'dm-seen', by: ws.uid }); // 보낸 사람 화면에 '읽음'을 띄운다
+        return true;
+      }
+      case 'dm-delete': { // 내가 보낸 쪽지를 양쪽에서 지운다 (남이 보낸 건 못 지움)
+        const peer = String(m.with || ''), key = convKey(ws.uid, peer), list = room.dms[key] || [];
+        const i = list.findIndex((x) => x.id === m.id && x.from === ws.uid);
+        if (i < 0) return true;
+        const [gone] = list.splice(i, 1);
+        if (!list.length) delete room.dms[key];
+        saveSoon();
+        for (const c of room.clients.values()) {
+          if (c.uid === ws.uid) send(c, { t: 'dm-deleted', id: gone.id, with: peer });
+          else if (c.uid === peer && !gone.drop) send(c, { t: 'dm-deleted', id: gone.id, with: ws.uid });
+        }
+        return true;
+      }
+      case 'dm-clear': { // 대화 정리: 내 화면에서만 지운다 (상대는 그대로)
+        const peer = String(m.with || '');
+        room.cleared[ws.uid + '>' + peer] = Date.now();
+        saveSoon();
+        for (const c of clientsOf(ws.uid)) send(c, { t: 'dm-cleared', with: peer });
+        return true;
+      }
+      case 'dm-block': { // 차단/해제
+        const uid = String(m.uid || '');
+        if (uid === ws.uid || !room.members[uid]) return true;
+        const set = new Set(blocksOf(ws.uid)); m.on ? set.add(uid) : set.delete(uid);
+        room.blocks[ws.uid] = [...set]; if (!set.size) delete room.blocks[ws.uid];
+        saveSoon();
+        for (const c of clientsOf(ws.uid)) send(c, { t: 'blocks', list: blocksOf(ws.uid) });
+        return true;
+      }
+      case 'dm-members': { // 새 쪽지를 시작할 사람 고르기: 접속한 적 있는 모든 사람 (접속 중인 사람이 먼저)
+        const mine = new Set(blocksOf(ws.uid));
+        const list = Object.keys(room.members).filter((u) => u !== ws.uid).map((u) => ({ ...peerInfo(u), blocked: mine.has(u) }))
+          .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name, 'ko'));
+        send(ws, { t: 'members', list });
         return true;
       }
       case 'push-sub': addSub(ws, m); return true;
@@ -156,5 +205,5 @@ module.exports = function createMessages({ room, send, newId, saveSoon }) {
 
   prune();
   setInterval(prune, 3600e3).unref();
-  return { SPOOFS, uidOf, remember, inboxFor, handle, avatarOf, peerInfo };
+  return { SPOOFS, uidOf, remember, inboxFor, blocksOf, handle, avatarOf, peerInfo };
 };

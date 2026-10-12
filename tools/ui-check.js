@@ -126,6 +126,56 @@ fs.mkdirSync(OUT, { recursive: true });
     await js(`applyTheme('catppuccin-latte')`); await wait(300);
     await shot('m-latte.png');
     await js(`applyTheme('auto')`);
+    // ---- 설정 창(옵션)이 폰에서 제대로 나오는지: 화면 안, 끝까지 스크롤, 닫기 버튼 항상 보임, 가로 넘침 없음 ----
+    for (const [w, h, mobile, label] of [[390, 844, true, '폰 세로'], [360, 640, true, '작은 폰'], [844, 390, true, '폰 가로'], [1280, 860, false, 'PC']]) {
+      await view(w, h, mobile); await wait(400);
+      await js(`document.querySelector('#settingsBtn').click()`); await wait(500);
+      const r = await js(`(() => {
+        const d = document.querySelector('#settings'), b = d.querySelector('.dlg-b'), close = d.querySelector('.dlg-h .btn'), box = d.getBoundingClientRect();
+        const vis = (e) => { const x = e.getBoundingClientRect(); return x.top >= box.top - 1 && x.bottom <= box.bottom + 1 && x.left >= box.left - 1 && x.right <= box.right + 1; };
+        const res = { open: d.open, vw: innerWidth, vh: innerHeight, box: { t: box.top, b: box.bottom, l: box.left, r: box.right }, scrolls: b.scrollHeight > b.clientHeight, hover: b.scrollWidth - b.clientWidth };
+        const c0 = close.getBoundingClientRect(); res.closeSize = [Math.round(c0.width), Math.round(c0.height)];
+        res.closeVisible0 = vis(close);
+        b.scrollTop = b.scrollHeight;                          // 맨 아래까지
+        res.closeVisibleAfter = vis(close);                    // 스크롤해도 닫기 버튼이 그대로 보여야 함
+        const last = [...d.querySelectorAll('.dlg-b section')].pop();
+        res.lastReachable = vis(last.querySelector('button, input, select') || last);
+        b.scrollTop = 0;
+        res.unreachable = [...d.querySelectorAll('.dlg-b h3')].filter((h) => { h.scrollIntoView({ block: 'center' }); return !vis(h); }).map((h) => h.textContent);
+        b.scrollTop = 0;
+        return res;
+      })()`);
+      console.log(`설정 창 ${label} ${w}x${h}`);
+      check(r.open && r.box.t >= -1 && r.box.l >= -1 && r.box.b <= r.vh + 1 && r.box.r <= r.vw + 1, `창이 화면 안에 들어옴 (위 ${Math.round(r.box.t)} 아래 ${Math.round(r.box.b)} / ${r.vh}, 오른쪽 ${Math.round(r.box.r)} / ${r.vw})`);
+      check(r.scrolls && r.lastReachable && r.unreachable.length === 0, `맨 아래 항목까지 스크롤로 닿음 (닿지 않는 제목: ${r.unreachable.join(', ') || '없음'})`);
+      check(r.closeVisible0 && r.closeVisibleAfter && r.closeSize[0] >= 44 && r.closeSize[1] >= 44, `닫기 버튼이 스크롤해도 항상 보이고 크기 충분 (${r.closeSize.join('x')})`);
+      check(r.hover <= 0, `가로로 넘치지 않음 (${r.hover}px)`);
+      if (label !== 'PC') await shot(`settings-${w}x${h}.png`);
+      await js(`document.querySelector('#settings').close()`);
+    }
+    await view(390, 844, true); await wait(300);
+    // 폰에서는 전체 화면 시트로 열려야 한다 (작은 팝업은 손가락으로 다루기 어렵다)
+    await js(`document.querySelector('#settingsBtn').click()`); await wait(400);
+    const sheet = await js(`(() => { const r = document.querySelector('#settings').getBoundingClientRect(); return { w: r.width, h: r.height, vw: innerWidth, vh: innerHeight }; })()`);
+    check(Math.abs(sheet.w - sheet.vw) <= 1 && Math.abs(sheet.h - sheet.vh) <= 1, `폰에서 설정 창이 화면을 꽉 채움 (${Math.round(sheet.w)}x${Math.round(sheet.h)} / ${sheet.vw}x${sheet.vh})`);
+    await js(`document.querySelector('#settings').close()`);
+
+    console.log('<dialog>를 모르는 구형 브라우저 흉내 (iOS 15.4 미만 등)');
+    await js(`window.__dlg = [HTMLDialogElement.prototype.showModal, HTMLDialogElement.prototype.close]; HTMLDialogElement.prototype.showModal = undefined; HTMLDialogElement.prototype.close = undefined;`);
+    const href0 = await js(`location.href`);
+    check(await js(`getComputedStyle(document.querySelector('#settings')).display === 'none'`), '닫혀 있을 때는 내용이 페이지에 펼쳐지지 않고 숨겨짐');
+    await js(`document.querySelector('#settingsBtn').click()`); await wait(400);
+    const fb = await js(`(() => { const d = document.querySelector('#settings'), r = d.getBoundingClientRect(); return { open: d.hasAttribute('open'), shown: getComputedStyle(d).display !== 'none' && r.width > 0, inView: r.left >= -1 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1 }; })()`);
+    check(fb.open && fb.shown && fb.inView, '설정 버튼을 누르면 창이 열리고 화면 안에 들어옴');
+    await js(`document.querySelector('#setClose').click()`); await wait(300);
+    check(!(await js(`document.querySelector('#settings').hasAttribute('open')`)) && (await js(`location.href`)) === href0, '닫기를 누르면 닫히고 페이지가 다른 곳으로 이동하지 않음');
+    await js(`[HTMLDialogElement.prototype.showModal, HTMLDialogElement.prototype.close] = window.__dlg`);
+    // :has()를 모르는 브라우저에서도 선택된 테마가 표시되어야 한다
+    await js(`document.querySelector('#settingsBtn').click()`); await wait(300);
+    await js(`document.querySelector('#themeGrid input[value="nord"]').click()`); await wait(200);
+    check(await js(`document.querySelectorAll('#themeGrid .tc.sel').length === 1 && document.querySelector('#themeGrid input[value="nord"]').closest('.tc').classList.contains('sel')`), '선택한 테마 카드에만 선택 표시(.sel)가 붙음');
+    await js(`applyTheme('auto'); markThemeCard(); document.querySelector('#settings').close()`);
+
     console.log('페이지 예외:', errors.length ? errors : '없음'); if (errors.length) failed++;
     guest.close(); cdp.close();
   } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }

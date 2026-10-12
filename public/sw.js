@@ -1,8 +1,8 @@
 /* 서비스 워커: 앱 껍데기를 저장해 두고(설치 가능 조건), 서버가 꺼졌을 때도 '서버가 꺼졌습니다' 안내 페이지가 뜨게 한다.
    파일을 추가하면 SHELL 목록과 CACHE 이름(버전)을 같이 올린다. 정적 파일은 '네트워크 우선'이라 서버를 고치면 바로 반영된다. */
-const CACHE = 'siru-shell-v2';
+const CACHE = 'siru-shell-v5';
 const SHELL = [
-  '/', '/style.css', '/themes.css', '/app.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/dm.js', '/notify.js', '/panic.js',
+  '/', '/style.css', '/themes.css', '/app.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/layout.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 
@@ -25,7 +25,7 @@ const fallback = async (res) => (await caches.match('/')) || res || Response.err
 self.addEventListener('fetch', (e) => {
   const req = e.request, url = new URL(req.url);
   // 같은 사이트의 GET만. /healthz는 반드시 실제 서버에 물어야 하므로 가로채지 않는다.
-  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname === '/healthz') return;
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname === '/healthz' || url.pathname.startsWith('/f/')) return; // 올린 사진·동영상은 용량이 크고 Range 요청이 필요해서 가로채지 않는다
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then((res) => (res.status >= 500 ? fallback(res) : res)).catch(() => fallback()));
     return;

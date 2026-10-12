@@ -4,3 +4,4 @@ state.json
 tmp/
 .env
 config.env
+uploads/

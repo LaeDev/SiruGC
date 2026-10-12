@@ -37,7 +37,7 @@ const tickClock = () => { $('#saverClock').textContent = new Date().toLocaleTime
 function startSaver() {
   if (saverOn) return;
   saverOn = true; saverArmedAt = Date.now() + 500; // 누르던 손이 바로 닫지 않게 0.5초는 무시
-  if (settingsDlg.open) settingsDlg.close();
+  if (settingsDlg.hasAttribute('open')) closeSettings();
   SAVER_UI.forEach((s) => { const e = $(s); if (e) e.inert = true; }); // 키보드로 뒤의 화면을 조작할 수 없게
   saverEl.hidden = false;
   document.documentElement.requestFullscreen?.().catch(() => {}); // 가능하면 전체 화면 (Esc 키는 브라우저가 전체 화면 해제로 먼저 쓴다)

@@ -33,7 +33,8 @@ function applySound() {
   const ytHidden = $('#ytWrap').hidden;
   if (playerReady) (soundOff || ytHidden ? player.mute() : player.unMute());
   screenEl.muted = soundOff || !!localStream;
-  vpcs.forEach((v) => (v.audio.muted = soundOff));
+  applyAllVoiceVolumes(); // 상대 목소리: 모든 소리 끄기 + 사람별 크기
+  document.querySelectorAll('.media video').forEach((v) => (v.muted = soundOff)); // 채팅에 올라온 동영상
 }
 
 /* ================= 같이 보기 (유튜브) ================= */
@@ -124,14 +125,47 @@ function renderQueue() {
     $('#nowSkip').hidden = !canManage(cur.by);
   }
   const ul = $('#qList'); ul.replaceChildren();
-  for (const q of queue) {
+  queue.forEach((q, i) => {
     const btns = el('div', { className: 'qbtns' });
-    if (canManage(q.by)) btns.append(iconBtn('i-play', '바로 재생', () => send({ t: 'queue-play', qid: q.qid })), iconBtn('i-x', '대기열에서 빼기', () => send({ t: 'queue-remove', qid: q.qid })));
-    ul.append(el('li', {}, thumb(q.videoId),
-      el('div', { className: 'qt' }, el('b', { textContent: q.title || q.videoId }), el('small', { textContent: `${q.byName} 님이 올렸어요` })), btns));
-  }
+    if (canManage(q.by)) {
+      const grip = iconBtn('i-grip', '끌어서 순서 바꾸기', () => {}); grip.classList.add('grip');
+      const up = iconBtn('i-up', '위로 옮기기', () => send({ t: 'queue-move', qid: q.qid, to: i - 1 })), down = iconBtn('i-down', '아래로 옮기기', () => send({ t: 'queue-move', qid: q.qid, to: i + 1 }));
+      up.disabled = i === 0; down.disabled = i === queue.length - 1;
+      btns.append(grip, up, down, iconBtn('i-play', '바로 재생', () => send({ t: 'queue-play', qid: q.qid })), iconBtn('i-x', '대기열에서 빼기', () => send({ t: 'queue-remove', qid: q.qid })));
+      const li = el('li', {}, thumb(q.videoId), el('div', { className: 'qbody' }, el('div', { className: 'qt' }, el('b', { textContent: q.title || q.videoId }), el('small', { textContent: `${q.byName} 님이 올렸어요` })), btns));
+      li.dataset.qid = q.qid; dragToReorder(grip, li, q, ul);
+      ul.append(li);
+    } else {
+      const li = el('li', {}, thumb(q.videoId), el('div', { className: 'qbody' }, el('div', { className: 'qt' }, el('b', { textContent: q.title || q.videoId }), el('small', { textContent: `${q.byName} 님이 올렸어요` }))));
+      li.dataset.qid = q.qid; ul.append(li); // 남이 올린 항목에도 번호를 달아 둔다
+    }
+  });
   $('#qEmpty').hidden = queue.length > 0 || !!cur;
   setDot('queue', queue.length);
+}
+// 끌어서 순서 바꾸기 (마우스·터치·펜 모두): 손잡이를 잡고 위아래로 끌면 다른 항목이 비켜서고, 놓으면 그 자리로 서버에 알린다
+function dragToReorder(grip, li, q, ul) {
+  grip.style.touchAction = 'none'; // 손잡이 위에서는 화면 스크롤 대신 끌기로 쓴다
+  grip.addEventListener('pointerdown', (e) => {
+    if (e.button > 0) return;
+    e.preventDefault(); grip.setPointerCapture(e.pointerId);
+    const items = [...ul.children], from = items.indexOf(li), rects = items.map((x) => x.getBoundingClientRect());
+    const step = rects[from].height + parseFloat(getComputedStyle(ul).rowGap || 0), y0 = e.clientY;
+    let to = from; li.classList.add('dragging');
+    const move = (ev) => {
+      const dy = ev.clientY - y0, mid = rects[from].top + rects[from].height / 2 + dy;
+      li.style.transform = `translateY(${dy}px)`;
+      to = rects.findIndex((r) => mid < r.top + r.height); // 끌고 있는 항목의 가운데가 걸친 칸이 새 위치 (맨 위 위쪽이면 0, 맨 아래 아래쪽이면 -1)
+      if (to < 0) to = items.length - 1;
+      items.forEach((x, i) => { if (x !== li) x.style.transform = from < to && i > from && i <= to ? `translateY(${-step}px)` : from > to && i >= to && i < from ? `translateY(${step}px)` : ''; });
+    };
+    const end = (ev) => {
+      grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', end); grip.removeEventListener('pointercancel', end);
+      li.classList.remove('dragging'); items.forEach((x) => (x.style.transform = ''));
+      if (ev.type === 'pointerup' && to !== from) send({ t: 'queue-move', qid: q.qid, to });
+    };
+    grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', end); grip.addEventListener('pointercancel', end);
+  });
 }
 $('#nowSkip').onclick = () => send({ t: 'yt-next' });
 $('#qForm').onsubmit = (e) => {

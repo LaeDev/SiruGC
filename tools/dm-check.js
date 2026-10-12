@@ -85,18 +85,18 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     console.log('모든 소리 끄기');
     await A.js(`document.querySelector('#voiceBtn').click()`); await wait(1200);
     await B.js(`document.querySelector('#voiceBtn').click()`); await wait(2500);
-    check(await A.js(`vpcs.size === 1 && [...vpcs.values()].every((v) => v.audio.muted === false)`), '켜 둔 상태: 상대 목소리가 재생됨(음소거 아님)');
+    check(await A.js(`vpcs.size === 1 && [...vpcs.values()].every((v) => v.gain && v.gain.gain.value === 1)`), '켜 둔 상태: 상대 목소리가 재생됨(음소거 아님)');
     await A.js(`document.querySelector('#soundBtn').click()`); await wait(300);
-    check(await A.js(`soundOff && [...vpcs.values()].every((v) => v.audio.muted) && document.querySelector('#screen').muted && document.querySelector('#soundBtn').getAttribute('aria-pressed') === 'true'`), '스피커 버튼: 음성·공유 화면 소리가 모두 꺼지고 버튼이 눌린 상태로 바뀜');
+    check(await A.js(`soundOff && [...vpcs.values()].every((v) => v.gain.gain.value === 0) && document.querySelector('#screen').muted && document.querySelector('#soundBtn').getAttribute('aria-pressed') === 'true'`), '스피커 버튼: 음성·공유 화면 소리가 모두 꺼지고 버튼이 눌린 상태로 바뀜');
     check(await A.js(`!micMuted && mic.getAudioTracks()[0].enabled`), '내 마이크는 건드리지 않음');
     check(await A.js(`document.querySelector('#soundBtn').classList.contains('stop')`), '꺼진 상태는 빨강으로 표시');
     await A.js(`document.querySelector('#soundBtn').click()`); await wait(200);
-    check(await A.js(`!soundOff && [...vpcs.values()].every((v) => !v.audio.muted)`), '다시 누르면 소리가 돌아옴');
+    check(await A.js(`!soundOff && [...vpcs.values()].every((v) => v.gain.gain.value === 1)`), '다시 누르면 소리가 돌아옴');
 
     console.log('패닉');
     await A.js(`document.querySelector('#panicBtn').click()`); await wait(400);
     check(await A.js(`!document.querySelector('#saver').hidden && saverOn`), '패닉 버튼: 화면 보호기가 뜸');
-    check(await A.js(`soundOff && micMuted && !mic.getAudioTracks()[0].enabled && [...vpcs.values()].every((v) => v.audio.muted)`), '소리와 내 마이크가 모두 꺼짐');
+    check(await A.js(`soundOff && micMuted && !mic.getAudioTracks()[0].enabled && [...vpcs.values()].every((v) => v.gain.gain.value === 0)`), '소리와 내 마이크가 모두 꺼짐');
     check(await A.js(`document.title === '계산기'`), '탭 제목은 위장 설정 그대로(계산기)');
     check(await A.js(`document.querySelector('#app').inert === true`), '뒤의 화면은 잠겨서 키보드로 조작할 수 없음');
     check(await A.js(`document.querySelector('#saverCanvas').width > 0 && document.querySelector('#saverClock').textContent.length > 0`), '별 화면과 시계가 그려짐');
