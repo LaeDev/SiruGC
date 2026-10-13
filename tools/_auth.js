@@ -15,6 +15,11 @@ async function signup(port, name) {
   return made.get(k);
 }
 // 화면(페이지)에서 실행할 코드: 이 기기에 로그인 상태를 만들고 입장 화면을 그에 맞춘다
-const loginJs = (a) => `localStorage.setItem('tok', ${JSON.stringify(a.token)}); localStorage.setItem('acctName', ${JSON.stringify(a.name)}); authUi(); acctUi();`;
+const loginJs = (a) => `(async () => { localStorage.setItem('tok', ${JSON.stringify(a.token)}); localStorage.setItem('acctName', ${JSON.stringify(a.name)}); authUi(); acctUi(); await e2eeReady; return (await e2eeUnlock(${JSON.stringify(a.password)})).ok; })()`; // 쪽지 보안 키도 이 기기에서 만들어 둔다 (이미 있으면 비밀번호로 푼다)
 
-module.exports = { AUTH_ENV, signup, loginJs };
+// 관리자 계정(설정 파일의 ADMIN_NAME/ADMIN_PASSWORD)으로 로그인한다
+async function adminLogin(port) {
+  const r = await fetch(`http://localhost:${port}/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: AUTH_ENV.ADMIN_NAME, password: AUTH_ENV.ADMIN_PASSWORD }) });
+  const j = await r.json(); if (!j.ok) throw new Error('관리자 로그인 실패 ' + JSON.stringify(j)); return j;
+}
+module.exports = { AUTH_ENV, signup, loginJs, adminLogin };

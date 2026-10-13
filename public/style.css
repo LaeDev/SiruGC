@@ -287,6 +287,43 @@ kbd{padding:1px 6px;border:1.5px solid var(--line);border-radius:6px;background:
 
 /* ---------- 화면 보호기 (패닉) ---------- */
 #saver{position:fixed;inset:0;z-index:1000;background:#000;cursor:none;touch-action:manipulation}
+/* 패닉 화면의 강의 */
+#lecture{position:fixed;inset:0;z-index:-1;opacity:0;pointer-events:none;background:#000}
+#lecture iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+#lecture.on{z-index:999;opacity:1}
+#saver.lec{background:transparent}
+#saver.lec #saverCanvas,#saver.lec #saverClock{display:none}
+#saver:not(.lec) .lec-top,#saver:not(.lec) .lec-bar{display:none}
+.lec-shield{position:absolute;inset:0;touch-action:none;-webkit-user-select:none;user-select:none;outline:none}
+.lec-top{position:absolute;left:0;right:0;top:0;padding:14px 20px 28px;background:linear-gradient(rgba(0,0,0,.7),transparent);color:#f2f3f5;font:500 16px/1.3 var(--body);opacity:0;transition:opacity .25s;pointer-events:none}
+.lec-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:32px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.78));color:#f2f3f5;opacity:0;transition:opacity .25s;pointer-events:none}
+#saver.ui{cursor:default}
+#saver.ui .lec-top,#saver.ui .lec-bar{opacity:1}
+#saver.ui .lec-bar{pointer-events:auto}
+.lec-bar button{flex:none;width:44px;height:44px;border:0;border-radius:50%;background:none;color:inherit;display:grid;place-items:center;cursor:pointer}
+.lec-bar button:hover{background:rgba(255,255,255,.16)}
+.lec-bar .i{width:22px;height:22px}
+.lec-bar input[type=range]{accent-color:#fff;height:44px;margin:0}
+#lecSeek{flex:1;min-width:0}
+#lecVol{flex:none;width:96px}
+#lecTime{flex:none;font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.lec-hold{position:absolute;left:50%;bottom:96px;width:72px;height:72px;margin-left:-36px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(rgba(255,255,255,.8) calc(var(--p,0)*1%),rgba(255,255,255,.16) 0);opacity:0;transition:opacity .7s;pointer-events:none}
+.lec-hold::before{content:'';position:absolute;inset:6px;border-radius:50%;background:rgba(0,0,0,.6)}
+.lec-hold b{position:relative;font:500 26px/1 var(--body);color:#fff;font-variant-numeric:tabular-nums}
+.lec-hold.on{opacity:1}
+.lec-auth{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(340px,calc(100% - 32px));display:grid;gap:12px;padding:20px;border-radius:14px;background:rgba(18,18,22,.94);color:#f2f3f5;box-shadow:0 0 0 1px rgba(255,255,255,.14)}
+.lec-auth[hidden]{display:none}
+.lec-auth p{margin:0;font-size:15px;line-height:1.5}
+.lec-auth input{min-height:48px;padding:0 14px;border-radius:10px;border:1.5px solid rgba(255,255,255,.3);background:#0d0d10;color:#fff;font-size:18px;text-align:center}
+.lec-auth input:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.lec-auth .lec-msg{color:#ffa3ab;font-size:14px;min-height:21px}
+.lec-btns{display:flex;gap:10px;justify-content:flex-end}
+.lec-btns button{min-height:44px;padding:0 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.3);background:none;color:#fff;font-weight:600;cursor:pointer}
+.lec-btns button[type=submit]{background:#fff;color:#111;border-color:#fff}
+#saver.asking{cursor:default}
+#saver.asking .lec-bar,#saver.asking .lec-hold{display:none}
+/* 방향 고정을 못 하는 기기(iPhone 등)에서 세로로 들고 있으면 화면을 90도 돌려 가로로 보여 준다 */
+#saver.rot,#lecture.rot{inset:auto;top:0;left:100%;width:100vh;height:100vw;transform-origin:0 0;transform:rotate(90deg)}
 #saver[hidden]{display:none}
 #saverCanvas{position:absolute;inset:0;width:100%;height:100%}
 #saverClock{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:300 clamp(48px,12vw,140px)/1 var(--body);color:rgba(255,255,255,.22);font-variant-numeric:tabular-nums;letter-spacing:.02em;pointer-events:none}
@@ -409,3 +446,13 @@ input[type=search]{width:100%;min-height:48px;padding:0 14px;background:var(--bg
 /* 연결이 끊겨 자리를 비운 사람 (폰 화면이 꺼진 경우 등) */
 .urow.away .av{opacity:.5}
 .urow.away .nm{color:var(--muted)}
+
+/* 쪽지 보안 키 열기 (이 기기에서 처음 쪽지를 쓸 때) */
+#dmLock { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+#dmLock[hidden] { display: none; }
+#dmLock .hint { margin: 0; padding: 0; text-align: left; }
+#dmLock .btn { align-self: flex-start; min-height: 44px; }
+#dmLock .msg-err { margin: 0; }
+
+/* 헤더의 "소리 끄기" 글자 버튼: 폰에서도 한 줄로 */
+#soundBtn { white-space: nowrap; padding: 0 12px; gap: 6px; }

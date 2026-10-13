@@ -51,14 +51,18 @@ function applyYt(s) {
   renderStage(); renderQueue();
   ensurePlayer(changed);
 }
-function ensurePlayer(changed) {
-  if (!window.YT?.Player) {
-    if (!$('#ytapi')) {
-      document.head.append(el('script', { id: 'ytapi', src: 'https://www.youtube.com/iframe_api' }));
-      window.onYouTubeIframeAPIReady = () => ensurePlayer(true);
-    }
-    return;
+// 유튜브 IFrame API는 한 번만 불러서, 같이 보기 플레이어와 패닉 강의 플레이어가 함께 쓴다
+const ytWaiters = [];
+function ytApi(cb) {
+  if (window.YT?.Player) return cb();
+  ytWaiters.push(cb);
+  if (!$('#ytapi')) {
+    document.head.append(el('script', { id: 'ytapi', src: 'https://www.youtube.com/iframe_api' }));
+    window.onYouTubeIframeAPIReady = () => ytWaiters.splice(0).forEach((f) => f());
   }
+}
+function ensurePlayer(changed) {
+  if (!window.YT?.Player) { ytApi(() => ensurePlayer(true)); return; }
   if (!player) {
     player = new YT.Player('ytplayer', {
       videoId: ytWant.videoId, playerVars: { playsinline: 1, rel: 0 },

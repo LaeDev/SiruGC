@@ -95,12 +95,12 @@ const UA = {
     check(await P.js("!document.querySelector('#settings').open && !saverOn"), '설정 창을 Esc로 닫은 뒤 바로 Esc를 눌러도 화면 보호기가 켜지지 않음');
     await esc(); await wait(150); await esc(); await wait(500);
     check(await P.js("saverOn"), '창이 없을 때의 Esc 두 번은 예전처럼 패닉이 됨');
-    await P.js("stopSaver()"); await wait(700);
+    await P.js("unlockSaver()"); await wait(700);
 
     console.log('쪽지 화면: 더 보기 메뉴와 차단');
     const Q = await page(390, 844, true); await Q.login('쪽지상대'); await Q.tap('#enter'); await wait(1800);
     const puid = await P.js('meUid'), quid = await Q.js('meUid');
-    await Q.js(`send({ t: 'dm', to: ${JSON.stringify(puid)}, text: '메뉴 확인용 쪽지' })`); await wait(700);
+    await Q.js(`dmSend(${JSON.stringify(puid)}, '메뉴 확인용 쪽지')`); await wait(700);
     await P.tap('#tab-dm'); await P.tap('#dmList .conv'); await wait(500);
     check(await P.js("!document.querySelector('#dmThread').hidden && ['#dmBack', '#dmMore'].every((s) => { const b = document.querySelector(s).getBoundingClientRect(); return b.width >= 44 && b.height >= 44; })"), '대화창 머리에는 뒤로 가기와 "더 보기" 버튼만 있음 (터치 크기 이상)');
     check(await P.js("document.querySelector('#dmMenu').hidden"), '정리·차단은 처음에는 보이지 않음');

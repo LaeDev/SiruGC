@@ -1,6 +1,6 @@
 // 로그인·가입·닉네임 바꾸기·로그아웃·계정 삭제와 호스트의 계정 관리를 실제 브라우저로 확인한다 (화면에서 직접 눌러서).
 // 실행: node tools/account-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능, SHOTS=폴더 로 화면 사진 저장)
-const { AUTH_ENV, signup, loginJs } = require('./_auth');
+const { AUTH_ENV, signup, loginJs, adminLogin } = require('./_auth');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -109,7 +109,7 @@ const UA = {
 
     console.log('닉네임 바꾸기 (설정 → 계정)');
     await G.tap('#settingsBtn'); await wait(400);
-    check(await G.js("!document.querySelector('#acctIn').hidden && document.querySelector('#acctInfo').textContent.includes('화면가입자') && !document.querySelector('#adminSec').hidden"), '설정에 계정 정보가 보이고, 호스트라서 "계정 관리"도 보임');
+    check(await G.js("!document.querySelector('#acctIn').hidden && document.querySelector('#acctInfo').textContent.includes('화면가입자')"), '설정에 계정 정보가 보임');
     await G.type('#renIn', '화면새이름'); await G.tap('#renGo'); await wait(900);
     check(await G.js("document.querySelector('#renMsg').textContent.includes('화면새이름') && get('acctName') === '화면새이름'"), '닉네임이 바뀌고 안내가 뜸');
     check(await G.js("[...document.querySelectorAll('#chat .m[data-sid] .bubble header b')].every((b) => b.textContent === '화면새이름')"), '화면에 남은 내 말풍선의 이름도 새 닉네임으로 바뀜');
@@ -124,15 +124,19 @@ const UA = {
     check(await G.js("document.querySelector('#acctIn').scrollWidth <= document.querySelector('#acctIn').clientWidth && document.querySelector('.dlg-b').scrollWidth <= document.querySelector('.dlg-b').clientWidth"), '폰 설정 창의 계정 칸이 가로로 넘치지 않음');
     await G.js("document.querySelector('#acctIn').scrollIntoView()"); await G.shot('5-settings-account-phone');
 
-    console.log('계정 관리 (호스트)');
-    const extra = await signup(PORT, '관리대상계정');
-    await G.tap('#acctRefresh');
-    check(await G.until("document.querySelectorAll('#acctList li').length >= 3"), '계정 목록에 관리자와 가입한 사람들이 보임');
-    check(await G.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리자')).querySelectorAll('button').length === 0"), '관리자 계정에는 초기화·밴·삭제 버튼이 없음');
-    await G.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리대상계정')).querySelector('button').click()"); await wait(900);
-    check(await G.js("/임시 비밀번호: [A-Za-z0-9]{10}/.test(document.querySelector('#acctMsg').textContent)"), '임시 비밀번호가 호스트 화면에 한 번 보임');
-    await G.js("document.querySelector('#adminSec').scrollIntoView()"); await G.shot('6-admin-list-phone');
+    console.log('계정 관리 (관리자만)');
+    check(await G.js("document.querySelector('#adminSec').hidden"), '호스트의 설정 창에는 "계정 관리"가 보이지 않음 (호스트는 게스트일 수도 있어서 계정 관리는 관리자만)');
     await G.js("document.querySelector('#setClose').click()"); await wait(200);
+    const extra = await signup(PORT, '관리대상계정');
+    const AD = await page(1280, 860, false); await AD.js(loginJs(await adminLogin(PORT))); await AD.tap('#enter'); await wait(1800);
+    check(await AD.js("joined && isAdmin && !isHost === false && !users.find((u) => u.id === me).host"), '관리자로 입장함 (호스트는 아님)');
+    await AD.js("window.confirm = () => true");
+    await AD.tap('#settingsBtn'); await wait(400);
+    check(await AD.until("!document.querySelector('#adminSec').hidden && document.querySelectorAll('#acctList li').length >= 3"), '관리자의 설정 창에는 계정 목록(관리자와 가입한 사람들)이 보임');
+    check(await AD.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리자')).querySelectorAll('button').length === 0"), '관리자 계정에는 초기화·밴·삭제 버튼이 없음');
+    await AD.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리대상계정')).querySelector('button').click()"); await wait(900);
+    check(await AD.js("/임시 비밀번호: [A-Za-z0-9]{10}/.test(document.querySelector('#acctMsg').textContent)"), '임시 비밀번호가 관리자 화면에 한 번 보임');
+    await AD.js("document.querySelector('#adminSec').scrollIntoView()"); await AD.shot('6-admin-list-desktop');
 
     console.log('로그아웃과 다시 로그인');
     await G.tap('#settingsBtn'); await G.tap('#logoutBtn');

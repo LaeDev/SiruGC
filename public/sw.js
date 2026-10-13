@@ -1,8 +1,8 @@
 /* 서비스 워커: 앱 껍데기를 저장해 두고(설치 가능 조건), 서버가 꺼졌을 때도 '서버가 꺼졌습니다' 안내 페이지가 뜨게 한다.
    파일을 추가하면 SHELL 목록과 CACHE 이름(버전)을 같이 올린다. 정적 파일은 '네트워크 우선'이라 서버를 고치면 바로 반영된다. */
-const CACHE = 'siru-shell-v8';
+const CACHE = 'siru-shell-v9';
 const SHELL = [
-  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/layout.js',
+  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/e2ee.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/layout.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 

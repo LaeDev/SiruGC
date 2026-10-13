@@ -4,7 +4,7 @@
 let authInfo = { allowed: false, signupOpen: false, host: '' };
 let pendingTemp = ''; // 임시 비밀번호로 로그인한 직후, 새 비밀번호를 정하는 동안만 들고 있는다
 const loggedIn = () => !!(get('tok') && get('acctName'));
-const clearLogin = () => { set('tok', ''); set('acctName', ''); };
+const clearLogin = () => { set('tok', ''); set('acctName', ''); e2eeClear(); }; // 이 기기의 쪽지 키도 같이 지운다
 const authDlg = $('#authDlg');
 
 async function authPost(path, body = {}) {
@@ -88,7 +88,7 @@ $('#authForm').onsubmit = async (e) => {
   if (authMode === 'change') {
     if (pw !== $('#authPw2').value) return void (msg.textContent = '새 비밀번호가 서로 달라요.');
     $('#authGo').disabled = true;
-    const r = await authPost('/auth/password', { old: $('#authOld').value, new: pw });
+    const r = await e2eePasswordChange($('#authOld').value, pw);
     $('#authGo').disabled = false;
     if (!r.ok) return void (msg.textContent = r.msg || '바꾸지 못했어요.');
     pendingTemp = ''; $('#authPw').value = $('#authPw2').value = ''; closeAuth(); return afterLogin();
@@ -102,6 +102,7 @@ $('#authForm').onsubmit = async (e) => {
   $('#authGo').disabled = false;
   if (!r.ok) return void (msg.textContent = r.msg || '처리하지 못했어요.');
   set('acctName', r.name);
+  if (!r.mustChange) await e2eeAfterAuth(pw, authMode === 'login' ? r.keys : null); // 쪽지 보안 키: 로그인이면 맡겨 둔 키를 풀고, 가입이면 새로 만든다
   if (r.mustChange) { pendingTemp = pw; $('#authPw').value = $('#authPw2').value = ''; return setAuthMode('change'); } // 임시 비밀번호: 새로 정해야 입장할 수 있다
   $('#authPw').value = $('#authPw2').value = ''; closeAuth(); afterLogin();
 };
@@ -109,7 +110,7 @@ $('#authForm').onsubmit = async (e) => {
 async function logout(all) {
   if (get('pushOn') && joined) { try { await disablePush(); } catch {} } // 이 브라우저의 알림 구독을 풀어서, 다음에 로그인하는 사람에게 이 사람의 알림이 가지 않게
   await authPost(all ? '/auth/logout-all' : '/auth/logout');
-  clearLogin(); location.reload();
+  clearLogin(); await e2eeClear(); location.reload();
 }
 
 /* ---------- 설정 창의 "계정" ---------- */
@@ -129,7 +130,7 @@ $('#renGo').onclick = async () => {
 };
 $('#pwGo').onclick = async () => {
   if ($('#pwNew').value !== $('#pwNew2').value) return setMsg('pwMsg', '새 비밀번호가 서로 달라요.');
-  const r = await authPost('/auth/password', { old: $('#pwOld').value, new: $('#pwNew').value });
+  const r = await e2eePasswordChange($('#pwOld').value, $('#pwNew').value);
   if (!r.ok) return setMsg('pwMsg', r.msg || '바꾸지 못했어요.');
   $('#pwOld').value = $('#pwNew').value = $('#pwNew2').value = '';
   setMsg('pwMsg', '비밀번호를 바꿨어요. 다른 기기에서는 로그아웃돼요.', true);
@@ -141,13 +142,13 @@ $('#delGo').onclick = async () => {
   if (get('pushOn') && joined) { try { await disablePush(); } catch {} }
   const r = await authPost('/auth/delete', { password: $('#delPw').value });
   if (!r.ok) return setMsg('delMsg', r.msg || '삭제하지 못했어요.');
-  clearLogin(); location.reload();
+  clearLogin(); await e2eeClear(); location.reload();
 };
 
 /* ---------- 설정 창의 "계정 관리" (호스트·관리자) ---------- */
 function refreshAdmin() {
-  $('#adminSec').hidden = !(joined && isHost);
-  if (joined && isHost) send({ t: 'acct-list' });
+  $('#adminSec').hidden = !(joined && isAdmin); // 계정 관리는 관리자만 (호스트는 게스트일 수도 있어서)
+  if (joined && isAdmin) send({ t: 'acct-list' });
 }
 $('#settingsBtn').addEventListener('click', () => { acctUi(); refreshAdmin(); });
 $('#joinSettings').addEventListener('click', () => { acctUi(); });
@@ -169,7 +170,7 @@ function renderAccts(list) {
 /* ---------- 서버가 보내는 로그인 관련 소식 ---------- */
 const LOGOUT_WHY = {
   deleted: '계정이 삭제됐어요.', password: '비밀번호가 바뀌어서 로그아웃됐어요. 다시 로그인해 주세요.', 'logout-all': '모든 기기에서 로그아웃했어요.',
-  reset: '호스트가 비밀번호를 초기화했어요. 받은 임시 비밀번호로 다시 로그인해 주세요.',
+  reset: '관리자가 비밀번호를 초기화했어요. 받은 임시 비밀번호로 다시 로그인해 주세요.',
 };
 Object.assign(handlers, {
   'auth-expired'(m) { // 토큰이 만료됐거나 폐기됐다: 게스트로 계속하고 알린다
@@ -179,8 +180,8 @@ Object.assign(handlers, {
   },
   'must-change'() { joinNote = '임시 비밀번호로 들어왔어요. 새 비밀번호를 정한 뒤에 입장할 수 있어요.'; openAuth('change'); },
   'login-required'() { joinNote = '쪽지함은 로그인한 사람만 쓸 수 있어요.'; authUi(); openAuth('login', joinNote); },
-  'logged-out'(m) { // 서버가 이 로그인을 끊었다 (계정 삭제, 비밀번호 변경, 초기화 …)
-    ended = true; clearLogin();
+  async 'logged-out'(m) { // 서버가 이 로그인을 끊었다 (계정 삭제, 비밀번호 변경, 초기화 …)
+    ended = true; clearLogin(); await e2eeClear();
     try { sessionStorage.setItem('loginNote', LOGOUT_WHY[m.reason] || '로그아웃됐어요.'); } catch {}
     location.reload();
   },

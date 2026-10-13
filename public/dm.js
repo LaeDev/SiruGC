@@ -2,7 +2,8 @@
 // 상대는 공개 번호(uid)로 부른다. 목록은 서버가 입장할 때 알려 주고, 새 쪽지는 'dm' 메시지로 실시간으로 온다.
 // 화면은 세 가지: 대화 목록(+새 쪽지) / 새 쪽지 상대 고르기 / 대화창.
 let meUid = null;
-const dmPeers = new Map();   // uid → { uid, name, color, last:{text,ts,mine}, unread, blocked }
+let dmKid = null;            // 서버가 알려 준 내 지금 쪽지 키 번호 (이 기기의 키와 같아야 쪽지를 풀 수 있다)
+const dmPeers = new Map();   // uid → { uid, name, color, last:{enc,text,ts,mine}, unread, blocked }
 const dmThreads = new Map(); // uid → 불러온 쪽지 기록
 let dmOpenUid = null;        // 지금 열어 둔 대화 상대
 let dmBlocked = new Set();   // 내가 차단한 사람들
@@ -22,7 +23,20 @@ const dayLabel = (ts) => {
   const d = new Date(ts), t = new Date(), y = new Date(t.getTime() - 86400e3);
   return d.toDateString() === t.toDateString() ? '오늘' : d.toDateString() === y.toDateString() ? '어제' : d.toLocaleDateString('ko-KR', { year: d.getFullYear() === t.getFullYear() ? undefined : 'numeric', month: 'long', day: 'numeric' });
 };
-const lastText = (m) => m.text || (m.media?.kind === 'video' ? '(동영상)' : '(사진)');
+// 쪽지는 암호문으로 오고, 이 기기에서 푼 내용이 msg.pt = { t: 글, m: 첨부 }. 풀 수 없으면 pt가 null
+const dmLocked = () => !!meUid && !(e2eeKey && e2eeKey.kid === dmKid);
+const lastText = (m) => (m.pt ? m.pt.t || (m.pt.m?.kind === 'video' ? '(동영상)' : '(사진)') : '암호화된 쪽지');
+const dmReveal = async (msgs) => { for (const x of [].concat(msgs)) x.pt = await dmDecrypt(x); };
+let dmChain = Promise.resolve(); // 풀리는 동안 다음 소식이 앞질러 처리되지 않게 차례로 처리한다
+const dmSerial = (fn) => (m) => { dmChain = dmChain.then(() => fn(m)).catch((e) => console.warn(e)); };
+async function dmPreviews() { // 대화 목록의 마지막 쪽지 미리보기를 이 기기에서 푼다
+  for (const p of dmPeers.values()) {
+    if (!p.last?.enc || p.last.text !== undefined) continue;
+    const x = { from: p.last.mine ? meUid : p.uid, to: p.last.mine ? p.uid : meUid, enc: p.last.enc };
+    await dmReveal(x); p.last.text = lastText(x);
+  }
+  dmRender();
+}
 
 // 쪽지가 왔을 때 앱 안에서 내는 짧은 소리 (모든 소리 끄기 / 패닉이 켜져 있으면 나지 않는다)
 let dingCtx = null;
@@ -45,22 +59,25 @@ function ding() {
 }
 
 function dmInit(m) {
-  meUid = m.me.uid || null; // 게스트는 null
+  meUid = m.me.uid || null; dmKid = m.kid || null; // 게스트는 null
   dmPeers.clear(); dmThreads.clear(); dmOpenUid = null; dmBlocked = new Set(m.blocks || []);
   for (const c of m.inbox || []) dmPeers.set(c.uid, c);
   dmView('list'); dmRender();
+  e2eeReady.then(() => { dmView(dmOpenUid ? 'thread' : 'list'); dmPreviews(); }); // 이 기기의 키를 읽은 뒤에 잠금 여부와 미리보기를 정한다
 }
 function dmRefresh() { dmRender(); }
 // 끊겼다 이어받았을 때: 끊겨 있던 동안 온 쪽지를 받은편지함에 반영하고, 열려 있는 대화는 기록을 다시 불러온다
 function dmResync(m) {
   dmBlocked = new Set(m.blocks || []);
   for (const c of m.inbox || []) dmPeers.set(c.uid, { ...dmPeers.get(c.uid), ...c });
-  dmRender();
+  dmKid = m.kid || null; dmRender(); dmPreviews();
   if (dmOpenUid) send({ t: 'dm-history', with: dmOpenUid });
 }
 
 /* ---------- 화면 전환 ---------- */
-function dmView(name) { // 'list' | 'picker' | 'thread'
+function dmView(name) { // 'list' | 'picker' | 'thread' (이 기기에 쪽지 키가 없으면 무엇이든 'lock')
+  if (dmLocked()) name = 'lock';
+  $('#dmLock').hidden = name !== 'lock';
   $('#dmListWrap').hidden = name !== 'list' || !meUid;
   $('#dmGuest').hidden = !!meUid || name !== 'list';
   $('#dmPicker').hidden = name !== 'picker';
@@ -79,9 +96,9 @@ function dmRender() {
     const blocked = dmBlocked.has(p.uid);
     btn.append(
       paintAvatar(el('span', { className: 'av' }), peerUser(p)),
-      el('span', { className: 'who' }, el('b', {}, p.name, p.prev ? el('small', { className: 'prev', textContent: ' 이전: ' + p.prev }) : ''), el('small', { textContent: (blocked ? '차단함 · ' : '') + (p.last.mine ? '나: ' : '') + p.last.text })),
+      el('span', { className: 'who' }, el('b', {}, p.name, p.prev ? el('small', { className: 'prev', textContent: ' 이전: ' + p.prev }) : ''), el('small', { textContent: (blocked ? '차단함 · ' : '') + (p.last.mine ? '나: ' : '') + (p.last.text ?? '') })),
       side);
-    btn.setAttribute('aria-label', `${p.name}${blocked ? ' (차단함)' : ''}, ${p.unread ? `안 읽은 쪽지 ${p.unread}개, ` : ''}마지막 쪽지: ${p.last.text}`);
+    btn.setAttribute('aria-label', `${p.name}${blocked ? ' (차단함)' : ''}, ${p.unread ? `안 읽은 쪽지 ${p.unread}개, ` : ''}마지막 쪽지: ${p.last.text ?? ''}`);
     ul.append(el('li', {}, btn));
   }
   $('#dmEmpty').hidden = list.length > 0;
@@ -106,8 +123,8 @@ function dmBubble(msg) {
   const who = mine ? { ...(users.find((u) => u.id === me) || {}), name: '나' } : peerUser(p || { uid: msg.from, name: '?' });
   const bubble = el('div', { className: 'bubble' },
     el('header', {}, el('b', { textContent: mine ? '나' : who.name }), el('time', { textContent: dmTime(msg.ts) })),
-    ...(msg.text ? [el('p', { textContent: msg.text })] : []));
-  if (msg.media) bubble.append(mediaNode(msg.media));
+    ...(!msg.pt ? [el('p', { className: 'hint', textContent: '이 기기에서는 풀 수 없는 쪽지예요. 이 기기에 보안 키가 없거나, 상대의 키가 바뀌기 전에 온 쪽지예요.' })] : msg.pt.t ? [el('p', { textContent: msg.pt.t })] : []));
+  if (msg.pt?.m) bubble.append(mediaNode(msg.pt.m));
   if (mine) { // 내 쪽지는 눌러서(또는 Enter) 삭제 메뉴를 연다
     const act = el('div', { className: 'mact', hidden: true }, el('button', { type: 'button', className: 'btn sm danger', textContent: '이 쪽지 삭제', onclick: () => confirm('이 쪽지를 지울까요? 상대 화면에서도 사라져요.') && send({ t: 'dm-delete', with: msg.to, id: msg.id }) }));
     bubble.append(act);
@@ -164,11 +181,35 @@ $('#dmMenu').addEventListener('click', () => dmMenu(false));
 document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) dmMenu(false); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#dmMenu').hidden) { dmMenu(false); $('#dmMore').focus(); } });
 $('#dmBack').onclick = () => { dmMenu(false); dmOpenUid = null; dmView('list'); dmRender(); };
-$('#dmForm').onsubmit = (e) => {
+// 암호화해서 보낸다. 보내지 못하면 이유를 알려 주고 입력한 글은 그대로 둔다 (true: 보냄)
+let dmPend = null; // 마지막으로 보낸 쪽지: 상대 키가 바뀌어 서버가 돌려보내면 새 키로 한 번 더 보낸다
+async function dmSend(to, text, media, tries = 0) {
+  const fail = (msg) => { handlers['dm-error']({ msg }); return false; };
+  if (dmLocked()) return fail('쪽지 보안 키가 잠겨 있어요. 쪽지 목록에서 비밀번호로 열어 주세요.');
+  let enc;
+  try { enc = await dmEncrypt(to, { t: text, m: media }); }
+  catch (e) { return fail(e.message === 'nopeer' ? '상대가 아직 보안 쪽지를 받을 준비가 안 됐어요. 상대가 한 번 로그인하면 보낼 수 있어요.' : '쪽지를 암호화하지 못했어요. 새로고침한 뒤 다시 해 주세요.'); }
+  dmPend = { to, text, media, tries };
+  return sendPaced('dm', { t: 'dm', to, enc }) || fail('연결이 끊겨서 보내지 못했어요. 다시 연결되면 보내 주세요.');
+}
+$('#dmForm').onsubmit = async (e) => {
   e.preventDefault();
   const text = $('#dmIn').value.trim();
-  if (text && dmOpenUid && !sendPaced('dm', { t: 'dm', to: dmOpenUid, text })) return sys('연결이 끊겨서 보내지 못했어요. 다시 연결되면 보내 주세요.');
+  if (text && dmOpenUid && !(await dmSend(dmOpenUid, text))) return;
   $('#dmIn').value = '';
+};
+$('#dmLock').onsubmit = async (e) => { // 이 기기에서 처음 쪽지를 쓸 때: 계정 비밀번호로 보안 키를 연다
+  e.preventDefault();
+  const pw = $('#dmLockPw').value, msg = $('#dmLockMsg'), go = $('#dmLockGo');
+  if (!pw) return;
+  go.disabled = true; msg.textContent = '여는 중이에요…';
+  const r = await e2eeUnlock(pw); go.disabled = false;
+  if (!r.ok) return void (msg.textContent = r.msg || '열지 못했어요. 비밀번호를 확인해 주세요.');
+  $('#dmLockPw').value = ''; msg.textContent = '';
+  dmKid = e2eeKey.kid; dmThreads.clear();
+  for (const p of dmPeers.values()) if (p.last) delete p.last.text;
+  dmView(dmOpenUid ? 'thread' : 'list'); await dmPreviews();
+  if (dmOpenUid) send({ t: 'dm-history', with: dmOpenUid });
 };
 $('#dmClear').onclick = () => {
   const p = dmPeers.get(dmOpenUid);
@@ -201,8 +242,10 @@ $('#pkSearch').oninput = renderPicker;
 
 /* ---------- 서버 메시지 ---------- */
 Object.assign(handlers, {
-  dm(m) {
+  dm: dmSerial(async (m) => {
     const msg = m.msg, mine = msg.from === meUid, peerUid = mine ? msg.to : msg.from;
+    await dmReveal(msg);
+    if (mine) dmPend = null;
     const p = dmPeers.get(peerUid) || { uid: peerUid, unread: 0 };
     Object.assign(p, { name: m.peer.name, color: m.peer.color, last: { text: lastText(msg), ts: msg.ts, mine } });
     dmPeers.set(peerUid, p);
@@ -216,8 +259,10 @@ Object.assign(handlers, {
     }
     if (!mine) { if (viewing) { send({ t: 'dm-read', with: peerUid }); p.unread = 0; } else { p.unread = (p.unread || 0) + 1; ding(); } }
     dmRender();
-  },
-  'dm-thread'(m) {
+  }),
+  'dm-thread': dmSerial(async (m) => {
+    e2eeNote(m.with, m.peer?.kid, m.peer?.pub);
+    await dmReveal(m.msgs);
     dmThreads.set(m.with, m.msgs);
     const p = dmPeers.get(m.with);
     if (p) {
@@ -227,26 +272,34 @@ Object.assign(handlers, {
     }
     if (dmOpenUid === m.with) dmDrawThread(m.msgs);
     dmRender();
+  }),
+  'dm-rekey'(m) { // 상대의 키가 바뀌어 있었다: 새 키로 한 번 더 암호화해서 보낸다
+    e2eeNote(m.uid, m.kid, m.pub);
+    if (dmPend?.to === m.uid && dmPend.tries < 1) dmSend(dmPend.to, dmPend.text, dmPend.media, 1);
+    else handlers['dm-error']({ msg: '상대의 보안 키가 바뀌어서 보내지 못했어요. 다시 보내 주세요.' });
   },
   'dm-read'(m) { const p = dmPeers.get(m.with); if (p) { p.unread = 0; dmRender(); } }, // 내 다른 기기에서 읽었을 때
   'dm-seen'(m) { // 상대가 내 쪽지를 읽었다
     const arr = dmThreads.get(m.by); if (arr) for (const x of arr) if (x.from === meUid) x.read = true;
     if (dmOpenUid === m.by) dmReceipt();
   },
-  'dm-deleted'(m) {
+  'dm-deleted': dmSerial(async (m) => {
     const arr = dmThreads.get(m.with); if (arr) dmThreads.set(m.with, arr.filter((x) => x.id !== m.id));
     if (dmOpenUid === m.with) { $('#dmMsgs').querySelector(`[data-id="${m.id}"]`)?.remove(); dmReceipt(); }
     send({ t: 'dm-history', with: m.with }); // 목록의 마지막 쪽지 미리보기를 다시 맞춘다
-  },
-  'dm-cleared'(m) {
+  }),
+  'dm-cleared': dmSerial(async (m) => {
     const p = dmPeers.get(m.with); if (p) { delete p.last; p.unread = 0; }
     dmThreads.delete(m.with);
     if (dmOpenUid === m.with) dmDrawThread([]);
     dmRender();
-  },
+  }),
   blocks(m) { dmBlocked = new Set(m.list); dmRender(); if (dmOpenUid) renderThreadHeader(); },
   members(m) { dmMembers = m.list; renderPicker(); },
-  'dm-error'(m) { if (dmOpenUid) { $('#dmMsgs').append(el('div', { className: 'sys err', textContent: m.msg })); dmScroll(); } else sys(m.msg); },
+  'dm-error'(m) {
+    if (m.code === 'no-key') { dmKid = '?'; dmView('list'); } // 서버가 알고 있는 내 키와 이 기기의 키가 다르다: 다시 열게 한다
+    if (dmOpenUid) { $('#dmMsgs').append(el('div', { className: 'sys err', textContent: m.msg })); dmScroll(); } else sys(m.msg);
+  },
 });
 
 // 알림을 눌러서 앱이 열렸을 때 (서비스 워커가 알려 준다)

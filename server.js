@@ -49,24 +49,27 @@ const BUILD = (() => {
 const room = {
   hostId: null, queueGrants: new Set(), bans: [], clients: new Map(), yt: null, seq: 0, queue: [], sharer: null, voice: new Map(),
   schema: 0, accounts: {}, sessions: {}, reserved: {}, // 계정, 로그인 세션(토큰 해시), 닉네임을 바꾸면서 한동안 비워 두는 옛 이름
+  keys: {}, // 쪽지 공개 키 기록: uid → [{ kid, pub, at }] (옛 쪽지를 풀 때 필요해서 계정을 지워도 남긴다)
   vapid: null, members: {}, dms: {}, subs: {}, // 쪽지/알림: 쪽지를 주고받는 계정 목록, 쪽지, 푸시 구독
   blocks: {}, cleared: {}, // 차단(내가 막은 사람들), 대화 정리(내 화면에서만 지운 시각)
 };
 let oldState = false;
 try { const raw = fs.readFileSync(DB, 'utf8'); oldState = raw.trim().length > 2; Object.assign(room, JSON.parse(raw)); } catch {}
 // 계정이 생기면서(스키마 2) 예전 기록(쪽지, 푸시 구독, 밴, 호스트 키)은 이어가지 않는다. 옛 파일은 지우지 않고 .bak 로 남긴다.
-if (room.schema !== 2) {
+if (room.schema !== 2 && room.schema !== 3) {
   if (oldState) {
     const bak = DB + '.bak-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') + '-' + Date.now();
     try { fs.copyFileSync(DB, bak); console.log('이전 버전의 저장 파일을 ' + path.basename(bak) + ' 로 백업하고 새로 시작해요. (쪽지·푸시 구독·밴 목록은 이어지지 않아요)'); } catch (e) { console.warn('저장 파일 백업에 실패했어요:', e.message); }
   }
-  Object.assign(room, { bans: [], members: {}, dms: {}, subs: {}, blocks: {}, cleared: {}, accounts: {}, sessions: {}, reserved: {}, vapid: null, schema: 2 });
+  Object.assign(room, { bans: [], members: {}, dms: {}, subs: {}, blocks: {}, cleared: {}, accounts: {}, sessions: {}, reserved: {}, keys: {}, vapid: null, schema: 3 });
   delete room.hostKey; delete room.salt;
 }
+// 스키마 2(쪽지가 암호화되기 전 버전)에서 올라오면 계정·밴 등은 그대로 두고, 평문으로 저장돼 있던 쪽지만 비운다
+if (room.schema === 2) { room.dms = {}; room.cleared = {}; room.keys = room.keys || {}; room.schema = 3; console.log('쪽지가 종단 암호화되면서 이전(암호화 전) 쪽지는 비웠어요.'); }
 if (!room.vapid) room.vapid = webpush.generateVAPIDKeys();                 // 푸시 서명 키 (개인 키는 서버 밖으로 나가지 않는다)
 
 const save = () => fs.writeFileSync(DB, JSON.stringify({
-  schema: 2, bans: room.bans, vapid: room.vapid, accounts: room.accounts, sessions: room.sessions, reserved: room.reserved,
+  schema: 3, bans: room.bans, vapid: room.vapid, accounts: room.accounts, sessions: room.sessions, reserved: room.reserved, keys: room.keys,
   members: room.members, dms: room.dms, subs: room.subs, blocks: room.blocks, cleared: room.cleared,
 }));
 let saveTimer = null; // 쪽지처럼 자주 바뀌는 것은 0.3초 모아서 한 번에 쓴다
@@ -76,18 +79,22 @@ save();
 
 // 프록시(NPM/nginx)가 X-Forwarded-For 맨 뒤에 실제 접속자 IP를 덧붙이므로 마지막 값을 쓴다.
 // 맨 앞 값은 접속자가 마음대로 넣을 수 있어서 쓰면 IP 밴을 피할 수 있다.
+// PROXY_IP(쉼표로 여러 개, 선택)를 정하면 그 주소에서 온 연결의 X-Forwarded-* 만 믿는다. 정하지 않으면 TRUST_PROXY일 때 누가 보내든 믿는다:
+// 이 경우 서버 포트가 프록시 밖에서 직접 열려 있으면 접속자가 IP·주소·https 표시를 위조해 로그인 횟수 제한과 https 강제를 피할 수 있으니, 방화벽으로 막거나 PROXY_IP를 정하세요.
+const PROXY_IPS = String(process.env.PROXY_IP || '').split(',').map((x) => x.trim().replace(/^::ffff:/, '')).filter(Boolean);
+const viaProxy = (req) => TRUST_PROXY && (!PROXY_IPS.length || PROXY_IPS.includes(String(req.socket.remoteAddress || '').replace(/^::ffff:/, '')));
 const clientIp = (req) => {
-  const raw = TRUST_PROXY && req.headers['x-forwarded-for']
+  const raw = viaProxy(req) && req.headers['x-forwarded-for']
     ? req.headers['x-forwarded-for'].split(',').pop().trim()
     : req.socket.remoteAddress;
-  return raw.replace(/^::ffff:/, '');
+  return String(raw || '').replace(/^::ffff:/, '');
 };
 
-const hostOf = (req) => String((TRUST_PROXY && req.headers['x-forwarded-host']) || req.headers.host || '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
+const hostOf = (req) => String((viaProxy(req) && req.headers['x-forwarded-host']) || req.headers.host || '').split(',')[0].trim().toLowerCase().replace(/:\d+$/, '');
 function authAllowed(req) {
   if (!AUTH_HOSTS.includes(hostOf(req))) return false;
   if (AUTH_ALLOW_HTTP) return true;
-  const proto = TRUST_PROXY ? String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() : (req.socket.encrypted ? 'https' : 'http');
+  const proto = viaProxy(req) ? String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() : (req.socket.encrypted ? 'https' : 'http');
   return proto === 'https';
 }
 
@@ -196,6 +203,14 @@ function handleAuth(req, res) {
     try { await authRoute(url, m, clientIp(req), json); } catch (e) { console.warn('인증 처리 오류:', e.message); json(500, { error: 'server' }); }
   });
 }
+// ---- 쪽지 종단 암호화 키 ----
+// 서버가 아는 것은 공개 키(P-256, 91바이트 SPKI)와, 비밀번호에서 만든 키로 감싼 비밀 키뿐이다. 비밀 키 원문과 쪽지 내용은 서버에 오지 않는다.
+const b64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const kidOf = (pubB64) => crypto.createHash('sha256').update(Buffer.from(pubB64, 'base64')).digest('hex').slice(0, 16);
+const validPub = (p) => typeof p === 'string' && b64.test(p) && Buffer.from(p, 'base64').length === 91;
+const validWrapped = (w) => !!w && typeof w === 'object' && w.v === 1 && Number.isInteger(w.i) && w.i >= 100000 && w.i <= 5000000
+  && [w.s, w.iv, w.ct].every((x) => typeof x === 'string' && b64.test(x)) && w.s.length <= 64 && w.iv.length <= 32 && w.ct.length <= 600;
+const curKey = (uid) => (room.keys[uid] || []).at(-1);
 async function authRoute(url, m, ip, json) {
   const fail = (code, r) => json(code, { error: r.error, msg: r.msg || AUTH_MSG[r.error] || '처리하지 못했어요.', wait: r.wait });
   if (url === '/auth/signup') {
@@ -205,16 +220,33 @@ async function authRoute(url, m, ip, json) {
   if (url === '/auth/login') {
     const r = await accounts.login({ name: m.name, password: m.password, ip });
     if (r.error === 'locked') return json(429, { error: 'locked', msg: `로그인에 여러 번 실패해서 잠겼어요. ${r.wait}분 뒤에 다시 해 주세요.`, wait: r.wait });
-    return r.ok ? json(200, { ok: true, name: r.name, token: r.token, mustChange: r.mustChange, avatar: r.acct.avatar || undefined, color: r.acct.color || undefined }) : fail(401, r);
+    const k = r.ok && curKey(r.acct.id);
+    return r.ok ? json(200, { ok: true, name: r.name, token: r.token, mustChange: r.mustChange, avatar: r.acct.avatar || undefined, color: r.acct.color || undefined, keys: r.acct.wrapped && k ? { wrapped: r.acct.wrapped, pub: k.pub, kid: k.kid } : null }) : fail(401, r);
   }
   const sess = accounts.session(m.token); // 아래는 모두 로그인한 상태에서만
   if (!sess || sess.reuse) return json(401, { error: 'session', msg: AUTH_MSG.session });
   const a = sess.acct, keep = typeof m.keep === 'string' ? m.keep : null;
   const ok = (extra = {}) => json(200, { ok: true, ...extra, token: extra.token || sess.token || undefined }); // 토큰이 새 값으로 바뀐 요청이면 함께 돌려준다
+  if (url === '/auth/check') { // 패닉 화면을 풀 때: 이 로그인의 비밀번호가 맞는지만 확인한다 (틀리면 같은 잠금 규칙)
+    const c = await accounts.confirm(a, m.password, 'unlock');
+    return c.ok ? ok() : fail(c.error === 'locked' ? 429 : 401, c.error === 'locked' ? { ...c, msg: `여러 번 틀려서 잠겼어요. ${c.wait}분 뒤에 다시 해 주세요.` } : c);
+  }
+  if (url === '/auth/keys/get') { // 이 기기에서 쪽지 키를 풀려고: 맡겨 둔(감싼) 비밀 키와 공개 키를 돌려준다
+    const k = curKey(a.id);
+    return ok({ keys: a.wrapped && k ? { wrapped: a.wrapped, pub: k.pub, kid: k.kid } : null });
+  }
+  if (url === '/auth/keys') { // 새 쪽지 키를 맡긴다 (처음 가입·로그인, 비밀번호 초기화 뒤)
+    if (!validPub(m.pub) || !validWrapped(m.wrapped)) return json(400, { error: 'keys', msg: '보안 키 형식이 올바르지 않아요.' });
+    const list = (room.keys[a.id] ||= []), kid = kidOf(m.pub);
+    if (!list.some((x) => x.kid === kid)) { list.push({ kid, pub: m.pub, at: Date.now() }); if (list.length > 20) list.shift(); }
+    else if (list.at(-1).kid !== kid) list.push(list.splice(list.findIndex((x) => x.kid === kid), 1)[0]); // 옛 키로 돌아오면 그 키를 현재로
+    a.wrapped = m.wrapped; saveSoon();
+    return ok({ kid });
+  }
   if (url === '/auth/logout') { accounts.logout(m.token); return json(200, { ok: true }); }
   if (url === '/auth/logout-all') { accounts.revokeAll(a.id); kickAcct(a.id, keep, 'logout-all'); return json(200, { ok: true }); }
   if (url === '/auth/password') {
-    const r = await accounts.changePassword(a, m.old, m.new);
+    const r = await accounts.changePassword(a, m.old, m.new, validWrapped(m.wrapped) ? m.wrapped : null);
     if (!r.ok) return fail(r.error === 'locked' ? 429 : 400, r);
     kickAcct(a.id, keep, 'password'); // 다른 기기의 로그인은 풀린다
     return ok({ token: r.token });
@@ -363,6 +395,7 @@ function sendJoined(ws, extra = {}) {
     users: ws.dmOnly ? [] : [...room.clients.values()].filter((c) => c.id !== ws.id && !c.dmOnly).map(userOf),
     yt: ws.dmOnly ? null : ytNow(), queue: ws.dmOnly ? [] : queueMsg().queue, sharer: ws.dmOnly ? null : room.sharer,
     voice: ws.dmOnly ? [] : voiceMsg().list, ice: ws.dmOnly ? undefined : iceServers(), dmOnly: ws.dmOnly || undefined,
+    kid: ws.uid ? curKey(ws.uid)?.kid : undefined, // 서버가 아는 내 현재 쪽지 키 (이 기기의 키와 다르면 다시 풀어야 한다)
     inbox: ws.uid ? messages.inboxFor(ws.uid) : [], blocks: ws.uid ? messages.blocksOf(ws.uid) : [], vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
     bans: isStaff(ws) ? banList() : undefined, build: BUILD, ...extra,
   });
@@ -486,12 +519,12 @@ wss.on('connection', (ws, req) => {
         for (const c of room.clients.values()) if (keyOf(c) === k && !c.dmOnly) broadcast({ t: 'user-update', user: userOf(c) });
         break;
       }
-      case 'acct-list': // 계정 관리: 목록
-        if (isStaff(ws)) send(ws, { t: 'accts', list: accounts.list().map((a) => ({ ...a, online: clientsOfAcct(a.uid).some((c) => !c.ghost) })) });
+      case 'acct-list': // 계정 관리(목록·임시 비밀번호·삭제·밴)는 관리자만. 호스트는 게스트일 수도 있어서, 호스트가 남의 비밀번호를 초기화하면 그 계정을 가로채 쪽지를 읽을 수 있다
+        if (ws.admin) send(ws, { t: 'accts', list: accounts.list().map((a) => ({ ...a, online: clientsOfAcct(a.uid).some((c) => !c.ghost) })) });
         break;
-      case 'acct-reset': case 'acct-delete': case 'acct-ban': { // 호스트·관리자: 임시 비밀번호 발급 / 계정 삭제 / 계정 밴. 관리자 계정은 건드릴 수 없다
+      case 'acct-reset': case 'acct-delete': case 'acct-ban': { // 관리자: 임시 비밀번호 발급 / 계정 삭제 / 계정 밴. 관리자 계정은 건드릴 수 없다
         const a = accounts.byId(String(m.uid || ''));
-        if (!isStaff(ws) || !a || a.role === 'admin') return;
+        if (!ws.admin || !a || a.role === 'admin') return;
         if (m.t === 'acct-reset') {
           accounts.resetPassword(a).then((r) => { kickAcct(a.id, null, 'reset'); send(ws, { t: 'acct-reset', uid: a.id, name: a.name, temp: r.temp }); }).catch((e) => console.warn(e.message));
         } else if (m.t === 'acct-delete') { removeAccount(a); send(ws, { t: 'acct-deleted', uid: a.id });

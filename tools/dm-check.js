@@ -2,7 +2,7 @@
 //   쪽지: 보내기, 안 읽음 표시, 답장, 다시 접속해도 기록이 남는지
 //   위장: 탭 제목·아이콘이 바뀌고 되돌아오는지, 미리보기
 //   소리: 스피커 버튼이 영상·공유·음성을 모두 끄는지
-//   패닉: 버튼 / Esc 두 번 → 소리·마이크 끄기 + 화면 보호기 + 뒤 화면 잠금, 아무 키·클릭으로 해제, 소리는 꺼진 채 유지
+//   패닉: 버튼 / Esc 두 번 → 소리·마이크 끄기 + 화면 보호기 + 뒤 화면 잠금, 풀려면 화면 10초 누르기 + 비밀번호(자세한 것은 panic-check), 소리는 꺼진 채 유지
 // 실행: node tools/dm-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
 const { AUTH_ENV, signup, loginJs } = require('./_auth');
 const { spawn } = require('child_process');
@@ -100,24 +100,19 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await A.js(`soundOff && micMuted && !mic.getAudioTracks()[0].enabled && [...vpcs.values()].every((v) => v.gain.gain.value === 0)`), '소리와 내 마이크가 모두 꺼짐');
     check(await A.js(`document.title === '계산기'`), '탭 제목은 위장 설정 그대로(계산기)');
     check(await A.js(`document.querySelector('#app').inert === true`), '뒤의 화면은 잠겨서 키보드로 조작할 수 없음');
-    check(await A.js(`document.querySelector('#saverCanvas').width > 0 && document.querySelector('#saverClock').textContent.length > 0`), '별 화면과 시계가 그려짐');
-    await A.js(`stopSaver()`); await wait(100);
-    check(await A.js(`saverOn`), '켜자마자 0.5초는 해제되지 않음(누르던 손이 닫지 않게)');
-    await wait(600); await A.key('a', 'KeyA', 65); await wait(300);
-    check(await A.js(`!saverOn && document.querySelector('#saver').hidden && document.querySelector('#app').inert === false`), '아무 키나 누르면 해제되고 뒤 화면이 다시 조작 가능');
+    check(await A.js(`!!document.querySelector('#lecShield') && !document.querySelector('#saver').hidden`), '화면 보호기(강의 화면)가 뜨고 누르기용 막이 있음');
+    await A.key('a', 'KeyA', 65); await A.key('Escape', 'Escape', 27); await wait(300);
+    check(await A.js(`saverOn && document.querySelector('#app').inert === true`), '아무 키나 Esc를 눌러도 풀리지 않음 (풀려면 10초 누르기 + 비밀번호)');
+    await A.js(`unlockSaver()`); await wait(200); // 실제 해제 흐름은 tools/panic-check.js 에서 확인한다
+    check(await A.js(`!saverOn && document.querySelector('#saver').hidden && document.querySelector('#app').inert === false`), '해제하면 뒤 화면이 다시 조작 가능');
     check(await A.js(`soundOff && micMuted`), '해제해도 소리와 마이크는 꺼진 채로 남음');
     await A.js(`setSoundOff(false); setMicMuted(false); (() => { const s = document.querySelector('#spoofSel'); s.value = 'off'; s.dispatchEvent(new Event('change')); })()`); await wait(200);
     await A.js(`document.querySelector('#panicBtn').blur(); document.body.focus()`);
     await A.key('Escape', 'Escape', 27); await wait(150); await A.key('Escape', 'Escape', 27); await wait(300);
     check(await A.js(`saverOn`), 'Esc를 빠르게 두 번 누르면 패닉');
     check(await A.js(`document.title === '새 탭'`), '위장을 안 쓰면 탭 제목이 평범한 "새 탭"으로 바뀜');
-    await wait(600); await A.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 200, button: 'left', clickCount: 1 }); await A.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 200, button: 'left', clickCount: 1 }); await wait(300);
-    check(await A.js(`!saverOn && document.title === '시루 그룹챗'`), '화면을 눌러도 해제되고 탭 제목이 원래대로');
-    await A.js(`document.querySelector('#panicBtn').click()`); await wait(300);
-    await A.js(`document.querySelector('#saver').dispatchEvent(new Event('pointerdown'))`); await wait(100);
-    check(await A.js(`saverOn`), '(재확인) 켜자마자 눌러도 0.5초 동안은 유지');
-    await wait(600); await A.key('Escape', 'Escape', 27); await wait(300);
-    check(await A.js(`!saverOn`), 'Esc 한 번으로도 해제');
+    await A.js(`unlockSaver()`); await wait(200);
+    check(await A.js(`!saverOn && document.title === '시루 그룹챗'`), '해제하면 탭 제목이 원래대로');
 
     console.log('푸시 알림 켜기');
     // 헤드리스 Chrome은 알림 권한을 허용할 수 없어서(grantPermissions가 성공해도 denied) 실제 구독은 여기서 검증하지 못한다.
