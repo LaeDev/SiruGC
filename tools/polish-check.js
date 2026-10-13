@@ -56,7 +56,7 @@ const UA = {
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!SHOTS) return; const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
-      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}/?step=profile` }); await wait(1200);
       return p;
     }
     const noOverflow = `document.documentElement.scrollWidth <= innerWidth`;

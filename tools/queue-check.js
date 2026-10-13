@@ -36,7 +36,7 @@ const VIDS = ['dQw4w9WgXcQ', 'jNQXAC9IVRw', 'aqz-KE-bpKQ', '9bZkp7q19f0', 'kJQP7
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 900, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       await js(`document.querySelector('#tab-queue').click()`);
       return { js, call };

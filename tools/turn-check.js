@@ -52,7 +52,7 @@ const mask = (s) => (s ? s.slice(0, 3) + '***(' + s.length + '자)' : '(없음)'
       await call('Page.enable'); await call('Runtime.enable');
       await call('Page.addScriptToEvaluateOnNewDocument', { source: `navigator.mediaDevices.getDisplayMedia = async () => { const c = document.createElement('canvas'); c.width = 640; c.height = 360; const g = c.getContext('2d'); let n = 0; setInterval(() => { g.fillStyle = 'hsl(' + (n++ * 9 % 360) + ' 70% 50%)'; g.fillRect(0, 0, 640, 360); }, 50); return c.captureStream(20); };` });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       if (join) { await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000); }
       return { js };
     }

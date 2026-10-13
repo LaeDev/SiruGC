@@ -5,6 +5,7 @@
 //  - 로그아웃하면 이 기기의 키가 지워진다
 // 실행: node tools/e2ee-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
 const { AUTH_ENV, signup, loginJs } = require('./_auth');
+const { safetyNumber } = require('./_e2e');
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -51,7 +52,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!process.env.SHOTS) return; fs.mkdirSync(process.env.SHOTS, { recursive: true }); const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
-      p.open = async () => { await call('Page.navigate', { url: `http://127.0.0.1:${PORT}` }); await wait(1200); };
+      p.open = async () => { await call('Page.navigate', { url: `http://127.0.0.1:${PORT}/?step=profile` }); await wait(1200); };
       p.enter = async (name) => { await js(`(() => { document.querySelector('#nameIn').value = ${JSON.stringify(name)}; document.querySelector('#joinForm').requestSubmit(); })()`); await p.until(`joined`); await wait(500); };
       return p;
     }
@@ -90,7 +91,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
 
     console.log('비밀번호 바꾸기');
     const NEWPW = 'brand-new-pass-77';
-    await A1.tap('#settingsBtn'); await wait(300);
+    await A1.tap('#settingsBtn'); await A1.js("setPage('acct')"); await wait(300);
     await A1.js(`[...document.querySelectorAll('details.sub > summary')].find((s) => s.textContent.includes('비밀번호')).click()`); await wait(200);
     await A1.type('#pwOld', a.password); await A1.type('#pwNew', NEWPW); await A1.type('#pwNew2', NEWPW); await A1.tap('#pwGo');
     check(await A1.until(`document.querySelector('#pwMsg').classList.contains('ok')`), '설정에서 비밀번호를 바꿈');
@@ -101,8 +102,38 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     await A3.enter('에이이'); await A3.js(`showTab('dm')`);
     check(await A3.until(`!dmLocked() && (dmPeers.values().next().value?.last?.text) === ${JSON.stringify(MSG)}`), '비밀번호를 바꾼 뒤에도 옛 쪽지가 읽힘');
 
+    console.log('암호화 확인 (안전번호·서버가 보관하는 모습·키 바뀜 경고)');
+    const aUid = await B1.js(`users.find((u) => u.name === '에이이')?.uid`);
+    await A1.js('closeSettings()'); await wait(200); // (앞에서 비밀번호를 바꾸느라 열어 둔 설정 창)
+    await A1.js(`openDm(${JSON.stringify(bUid)})`); await B1.js(`openDm(${JSON.stringify(aUid)})`); await wait(1000);
+    check(await A1.js(`document.querySelector('#dmEncTxt').textContent === '암호화됨'`), '대화창 머리에 "암호화됨" 표시가 있음');
+    await A1.tap('#dmEnc'); await B1.tap('#dmEnc'); await wait(600);
+    const num = (p) => p.js(`[...document.querySelectorAll('#encNum span')].map((s) => s.textContent).join(' ')`);
+    const nA = await num(A1), nB = await num(B1);
+    check(/^[0-9]{4}( [0-9]{4}){5}$/.test(nA) && nA === nB, '두 사람 화면의 안전번호가 같음 (' + nA + ' / ' + nB + ')');
+    const keys = await A1.js(`JSON.stringify([meUid, e2eeCur.get(meUid).pub, ${JSON.stringify(bUid)}, e2eeCur.get(${JSON.stringify(bUid)}).pub])`);
+    check(safetyNumber(...JSON.parse(keys)).join(' ') === nA, '안전번호가 두 공개 키로 따로 계산한 값과 같음 (화면이 아무 숫자나 보여 주는 게 아님)');
+    const ct = await A1.js(`document.querySelector('#encCt').textContent`), stored = await A1.js(`dmThreads.get(${JSON.stringify(bUid)}).at(-1).enc.ct`);
+    check(ct.length > 20 && stored.startsWith(ct.replace('…', '')) && !ct.includes('가나다') && (await A1.js(`document.querySelector('#encPt').textContent`)) === MSG, '"서버에 저장된 것"은 알아볼 수 없는 암호문(서버가 준 값 그대로)이고, "내 기기에서 푼 것"은 쪽지 내용');
+    await A1.shot('enc-dialog');
+    await A1.tap('#encOk');
+    check(await A1.js(`document.querySelector('#encState').textContent.includes('확인했어요') && document.querySelector('#dmEncTxt').textContent === '확인됨'`), '"번호가 같아요"를 누르면 확인됨으로 바뀜');
+    await A1.js(`document.querySelector('#encClose').click()`); await wait(200);
+    // 상대의 키가 바뀐 경우 (새 기기·비밀번호 초기화): 경고와 확인 해제
+    check(await B1.js(`(async () => { const n = await e2eeNewPair('임시-키교체-12345'); const r = await authPost('/auth/keys', { pub: n.pub, wrapped: n.wrapped }); return !!r.ok; })()`), '(준비) 상대가 새 보안 키를 맡김');
+    await A1.js(`dmBack?.click?.(); document.querySelector('#dmBack').click()`); await wait(300);
+    await A1.js(`openDm(${JSON.stringify(bUid)})`); await wait(1200);
+    check(await A1.js(`!document.querySelector('#dmKeyWarn').hidden && document.querySelector('#dmEncTxt').textContent === '암호화됨'`), '상대의 키가 바뀌면 경고가 뜨고 "확인됨"이 풀림');
+    await A1.shot('enc-warn');
+    await A1.tap('#dmKeyWarnGo'); await wait(500);
+    const nA2 = await num(A1);
+    check(/^[0-9]{4}( [0-9]{4}){5}$/.test(nA2) && nA2 !== nA, '안전번호가 새 키에 맞게 바뀜 (' + nA + ' → ' + nA2 + ')');
+    await A1.js(`document.querySelector('#encClose').click()`); await wait(200);
+    await A1.tap('#dmKeyAccept');
+    check(await A1.js(`document.querySelector('#dmKeyWarn').hidden`), '"알겠어요"를 누르면 경고가 사라짐');
+
     console.log('로그아웃');
-    await A3.tap('#settingsBtn'); await wait(300); await A3.tap('#logoutBtn'); await wait(2500);
+    await A3.tap('#settingsBtn'); await A3.js("setPage('acct')"); await wait(300); await A3.tap('#logoutBtn'); await wait(2500);
     check(await A3.js(`(async () => { await e2eeReady; return e2eeKey === null && !loggedIn(); })()`), '로그아웃하면 이 기기의 쪽지 키가 지워짐');
   } catch (e) { console.log('  실패 예외:', e.stack || e); failed++; }
   finally {

@@ -43,7 +43,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
     // 입장 (모바일 세로)
     await view(390, 844, true);
-    await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1500);
+    await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1500);
     await js(`document.querySelector('#joinForm').requestSubmit()`); await wait(200);
     check((await js(`document.querySelector('#joinMsg').textContent`)) === '닉네임을 입력해 주세요.', '닉네임이 비어 있으면 입장하지 않고 안내 문구가 나옴');
     await js(`(() => { const n = document.querySelector('#nameIn'); n.value = '하늘'; n.dispatchEvent(new Event('input')); document.querySelector('#emojis button[data-e="🦊"]').click(); document.querySelector('#swatches .sw[data-c="#a98bff"]').click(); document.querySelector('#joinForm').requestSubmit(); })()`);
@@ -107,7 +107,7 @@ fs.mkdirSync(OUT, { recursive: true });
     await js(`document.querySelector('#settingsBtn').click()`); await wait(400);
     await shot('d-settings.png');
     const dlg = await js(`(() => { const d = document.querySelector('#settings'); const b = d.getBoundingClientRect(); return { open: d.open, w: b.width, h: b.height, vh: innerHeight, cards: d.querySelectorAll('.tc').length }; })()`);
-    check(dlg.open && dlg.cards === 17, `설정 창이 열리고 테마 카드 17개 (${dlg.cards}개)`);
+    check(dlg.open && dlg.cards === 18, `설정 창이 열리고 테마 견본 18개 (${dlg.cards}개)`);
     check(dlg.h <= dlg.vh, `설정 창이 화면 안에 들어옴 (${Math.round(dlg.h)} / ${dlg.vh})`);
     await js(`document.querySelector('#settings').close()`);
     const tone = (sel) => js(`(() => { const b = document.querySelector('${sel}'); const c = getComputedStyle(b); return { bg: c.backgroundColor, fg: c.color, cls: b.className }; })()`);
@@ -133,24 +133,27 @@ fs.mkdirSync(OUT, { recursive: true });
       await view(w, h, mobile); await wait(400);
       await js(`document.querySelector('#settingsBtn').click()`); await wait(500);
       const r = await js(`(() => {
-        const d = document.querySelector('#settings'), b = d.querySelector('.dlg-b'), close = d.querySelector('.dlg-h .btn'), box = d.getBoundingClientRect();
-        const vis = (e) => { const x = e.getBoundingClientRect(); return x.top >= box.top - 1 && x.bottom <= box.bottom + 1 && x.left >= box.left - 1 && x.right <= box.right + 1; };
-        const res = { open: d.open, vw: innerWidth, vh: innerHeight, box: { t: box.top, b: box.bottom, l: box.left, r: box.right }, scrolls: b.scrollHeight > b.clientHeight, hover: b.scrollWidth - b.clientWidth };
+        const d = document.querySelector('#settings'), b = d.querySelector('#setPane'), close = d.querySelector('.dlg-h #setClose'), box = d.getBoundingClientRect();
+        const inBox = (e, r0) => { const x = e.getBoundingClientRect(); return x.top >= r0.top - 1 && x.bottom <= r0.bottom + 1 && x.left >= r0.left - 1 && x.right <= r0.right + 1; };
+        const res = { open: d.open, vw: innerWidth, vh: innerHeight, box: { t: box.top, b: box.bottom, l: box.left, r: box.right }, hover: 0, unreachable: [], scrolls: false };
         const c0 = close.getBoundingClientRect(); res.closeSize = [Math.round(c0.width), Math.round(c0.height)];
-        res.closeVisible0 = vis(close);
-        b.scrollTop = b.scrollHeight;                          // 맨 아래까지
-        res.closeVisibleAfter = vis(close);                    // 스크롤해도 닫기 버튼이 그대로 보여야 함
-        const last = [...d.querySelectorAll('.dlg-b section')].pop();
-        res.lastReachable = vis(last.querySelector('button, input, select') || last);
-        b.scrollTop = 0;
-        // 게스트에게는 숨기는 칸(알림, 계정 관리)은 닿을 필요가 없어서 뺀다
-        res.unreachable = [...d.querySelectorAll('.dlg-b h3')].filter((h) => !h.closest('[hidden]')).filter((h) => { h.scrollIntoView({ block: 'center' }); return !vis(h); }).map((h) => h.textContent);
-        b.scrollTop = 0;
+        res.closeVisible0 = inBox(close, box); res.closeVisibleAfter = true;
+        // 설정은 분류별 페이지다: 쓸 수 있는 분류를 하나씩 열어서 맨 아래까지 스크롤하고, 끝 항목이 보이는지·가로로 넘치는지 본다
+        for (const tab of [...d.querySelectorAll('#setNav .set-tab')]) {
+          setPage(tab.dataset.cat); const pr = b.getBoundingClientRect();
+          if (b.scrollHeight > b.clientHeight) res.scrolls = true;
+          b.scrollTop = b.scrollHeight; if (!inBox(close, box)) res.closeVisibleAfter = false;
+          const last = [...document.querySelector('.set-page.on').children].filter((e) => e.getBoundingClientRect().height > 0).pop();
+          if (!last || last.getBoundingClientRect().bottom > pr.bottom + 1) res.unreachable.push(tab.textContent.trim()); // (맨 아래 칸이 화면보다 클 수도 있으니 "아래 끝이 보이는가"만 본다)
+          res.hover = Math.max(res.hover, b.scrollWidth - b.clientWidth);
+          b.scrollTop = 0;
+        }
+        res.lastReachable = true;
         return res;
       })()`);
       console.log(`설정 창 ${label} ${w}x${h}`);
       check(r.open && r.box.t >= -1 && r.box.l >= -1 && r.box.b <= r.vh + 1 && r.box.r <= r.vw + 1, `창이 화면 안에 들어옴 (위 ${Math.round(r.box.t)} 아래 ${Math.round(r.box.b)} / ${r.vh}, 오른쪽 ${Math.round(r.box.r)} / ${r.vw})`);
-      check(r.scrolls && r.lastReachable && r.unreachable.length === 0, `맨 아래 항목까지 스크롤로 닿음 (닿지 않는 제목: ${r.unreachable.join(', ') || '없음'})`);
+      check(r.scrolls && r.lastReachable && r.unreachable.length === 0, `모든 분류의 맨 아래 항목까지 스크롤로 닿음 (닿지 않는 분류: ${r.unreachable.join(', ') || '없음'})`);
       check(r.closeVisible0 && r.closeVisibleAfter && r.closeSize[0] >= 44 && r.closeSize[1] >= 44, `닫기 버튼이 스크롤해도 항상 보이고 크기 충분 (${r.closeSize.join('x')})`);
       check(r.hover <= 0, `가로로 넘치지 않음 (${r.hover}px)`);
       if (label !== 'PC') await shot(`settings-${w}x${h}.png`);

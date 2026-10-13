@@ -35,13 +35,28 @@ const TRUST_PROXY = !!process.env.TRUST_PROXY; // 리버스 프록시 뒤에서�
 const AUTH_HOSTS = String(process.env.AUTH_HOST || 'sirugc.kro.kr').toLowerCase().split(',').map((x) => x.trim()).filter(Boolean);
 const AUTH_ALLOW_HTTP = process.env.AUTH_ALLOW_HTTP === '1';
 const DB = process.env.STATE_FILE || path.join(__dirname, 'state.json');
-const PUB = path.join(__dirname, 'public');
+const PUB = process.env.PUBLIC_DIR ? path.resolve(process.env.PUBLIC_DIR) : path.join(__dirname, 'public'); // (PUBLIC_DIR 은 자동 점검이 화면 파일 복사본으로 시험할 때만 쓴다)
 // 화면(클라이언트) 파일이 바뀌었는지 알아보는 번호: 서버 시작 때 파일 수정 시각 중 가장 늦은 것.
 // 열어 둔 탭·설치한 앱이 옛 버전이면 접속할 때 서버가 알려 주고, 화면이 새로고침 버튼을 보여 준다.
-const BUILD = (() => {
-  const t = [__filename, ...fs.readdirSync(PUB).map((n) => path.join(PUB, n))].map((p) => { try { return fs.statSync(p).mtimeMs; } catch { return 0; } });
-  return Math.floor(Math.max(...t)).toString(36);
-})();
+// 요청마다 다시 계산한다(2초 동안은 기억): 서버를 다시 켜지 않고 파일만 고쳐도 열어 둔 화면이 "새 버전"을 알아챈다.
+// 번호는 public/ 안 모든 파일의 "내용"으로 만든다(수정 시각이 아니라). 그래서 파일을 건드리기만 하거나 git 이 다시 쓰기만 해서는 안 바뀌고,
+// 실제로 화면 파일의 내용이 바뀌었을 때만 바뀐다. 파일마다 (수정 시각, 크기)가 그대로면 다시 읽지 않는다.
+let buildAt = 0, buildVal = '';
+const buildSig = new Map(); // 파일 → { sig, hash }
+const walkPub = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, n.name); if (n.isDirectory()) walkPub(p, out); else out.push(p); } return out; };
+const buildNow = () => {
+  if (Date.now() - buildAt < 3000 && buildVal) return buildVal;
+  const h = crypto.createHash('sha1');
+  for (const p of walkPub(PUB).sort()) {
+    try {
+      const st = fs.statSync(p), sig = st.mtimeMs + ':' + st.size;
+      let e = buildSig.get(p);
+      if (!e || e.sig !== sig) { e = { sig, hash: crypto.createHash('sha1').update(fs.readFileSync(p)).digest('hex') }; buildSig.set(p, e); }
+      h.update(p.slice(PUB.length) + e.hash);
+    } catch {}
+  }
+  buildAt = Date.now(); return (buildVal = h.digest('hex').slice(0, 10));
+};
 
 // 방은 하나. 밴 목록과 쪽지·푸시 같은 오래 남는 기록만 state.json에 저장한다.
 // 호스트는 저장하지 않는다: 방에 맨 처음 들어온 사람이 호스트이고, 나가거나 3분 넘게 끊기면 가장 오래 있던 사람에게 넘어간다.
@@ -101,13 +116,14 @@ function authAllowed(req) {
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.json': 'application/json', '.webmanifest': 'application/manifest+json',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8',
 };
 // public/ 아래 파일만 서빙한다. 확장자 없는 경로는 index.html로 보낸다.
 const server = http.createServer((req, res) => {
   if (uploads.handle(req, res)) return; // POST /upload, GET /f/<파일>
   // 서버가 살아 있는지 확인하는 주소. 꺼졌다가 돌아왔는지 클라이언트가 이걸로 본다.
   if (req.url.startsWith('/auth/')) return handleAuth(req, res);
+  if (req.url === '/build') return res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ build: buildNow() })); // 열어 둔 화면이 새 버전인지 물어보는 주소
   if (req.url === '/healthz') return res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end('ok');
   const av = req.url.match(/^\/a\/([0-9a-f]{12})$/); // 쪽지 목록에서 오프라인인 사람의 프사를 보여 주려고
   if (av) {
@@ -121,7 +137,14 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(PUB + path.sep)) return res.writeHead(403).end();
   fs.readFile(file, (err, data) => {
     if (err) return res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
-    if (path.basename(file) === 'index.html') data = Buffer.from(data.toString('utf8').replace('<head>', `<head><meta name="build" content="${BUILD}">`));
+    if (path.basename(file) === 'index.html') {
+      const b = buildNow();
+      // 화면 파일 주소에 버전(?v=)을 붙인다. NPM 같은 프록시가 .js/.css 를 "정적 파일"로 보고 우리가 보낸 no-cache 를 무시하고 한 시간 넘게 붙잡아 두는 일이 있어서(실제로 확인함),
+      // 버전이 바뀌면 주소 자체가 달라지게 해서 프록시의 옛 사본을 아예 못 쓰게 한다.
+      data = Buffer.from(data.toString('utf8').replace('<head>', `<head><meta name="build" content="${b}">`)
+        .replace(/(<script[^>]*\ssrc="|<link[^>]*\shref=")(\/[^"?#]+\.(?:js|css|webmanifest))(")/g, `$1$2?v=${b}$3`));
+    }
+    if (path.basename(file) === 'sw.js') data = Buffer.from(data.toString('utf8').split('__BUILD__').join(buildNow())); // 파일이 바뀌면 서비스 워커 파일도 바뀌어서 브라우저가 새 것으로 갈아 끼운다
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-cache', // 항상 재검증 (서비스 워커가 오프라인 대비를 맡음)
@@ -397,7 +420,7 @@ function sendJoined(ws, extra = {}) {
     voice: ws.dmOnly ? [] : voiceMsg().list, ice: ws.dmOnly ? undefined : iceServers(), dmOnly: ws.dmOnly || undefined,
     kid: ws.uid ? curKey(ws.uid)?.kid : undefined, // 서버가 아는 내 현재 쪽지 키 (이 기기의 키와 다르면 다시 풀어야 한다)
     inbox: ws.uid ? messages.inboxFor(ws.uid) : [], blocks: ws.uid ? messages.blocksOf(ws.uid) : [], vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
-    bans: isStaff(ws) ? banList() : undefined, build: BUILD, ...extra,
+    bans: isStaff(ws) ? banList() : undefined, build: buildNow(), ...extra,
   });
 }
 
@@ -645,5 +668,7 @@ server.listen(PORT, HOST, () => {
     }
   } else console.log(`  (${HOST}에서만 열려 있어요. 다른 기기에서 쓰려면 config.env에 HOST=0.0.0.0 을 적으세요)`);
   if (TRUST_PROXY) console.log('  프록시 모드: X-Forwarded-For의 마지막 값을 접속자 IP로 믿어요.');
+  else if (!AUTH_ALLOW_HTTP) console.log(`  주의: 프록시 모드(TRUST_PROXY)가 꺼져 있어서 ${AUTH_HOSTS[0]} 로 들어와도 로그인·가입이 막혀요. NPM 같은 프록시 뒤라면 config.env 에 TRUST_PROXY=1 과 HOST=0.0.0.0 을 적으세요.`);
+  if (!accounts.signupOpen()) console.log('  가입이 닫혀 있어요. 가입을 받으려면 config.env 에 SIGNUP_CODE 를 적으세요.');
   console.log('  끄려면 Ctrl+C');
 });

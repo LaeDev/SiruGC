@@ -64,4 +64,11 @@ async function decryptFile(blob, keyB64, ivB64) {
   return Buffer.from(await subtle.decrypt({ name: 'AES-GCM', iv: unb64(ivB64) }, key, blob));
 }
 
-module.exports = { newKeys, wrapPriv, unwrapPriv, encryptDm, decryptDm, encryptFile, decryptFile, kidOf, b64, unb64 };
+// 안전번호: 두 사람의 uid·공개 키(SPKI base64)로 만든 숫자 24자리(4자리 6묶음). public/dm.js 의 safetyNumber 와 같은 방식
+function safetyNumber(uidA, pubA, uidB, pubB) {
+  const [a, b] = [[uidA, pubA], [uidB, pubB]].sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  const h = createHash('sha256').update(['siru-safety-v1', a[0], a[1], b[0], b[1]].join('|')).digest();
+  return [0, 1, 2, 3, 4, 5].map((i) => String(h.readUInt32BE(i * 4) % 10000).padStart(4, '0'));
+}
+
+module.exports = { safetyNumber, newKeys, wrapPriv, unwrapPriv, encryptDm, decryptDm, encryptFile, decryptFile, kidOf, b64, unb64 };

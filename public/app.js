@@ -140,8 +140,53 @@ $('#nameIn').value = get('name') || '';
 $('.skip').setAttribute('href', '#nameIn'); $('.skip').textContent = '닉네임 입력으로 건너뛰기';
 refresh();
 // 입장 버튼은 둘: '입장하기'(방)와 '쪽지함'(방에 들어가지 않고 쪽지만). 어느 쪽을 눌렀는지는 wantDm에 담는다
-const setJoinBusy = (on) => { $('#enter').disabled = $('#inboxBtn').disabled = on; if (!on) { $('#enter').textContent = '입장하기'; $('#inboxBtn').lastChild.textContent = '쪽지함'; } else (wantDm ? $('#inboxBtn').lastChild : $('#enter')).textContent = '들어가는 중'; };
+const setJoinBusy = (on) => { $('#enter').disabled = $('#inboxBtn').disabled = $('#gDm').disabled = $('#gRoom').disabled = on; $('#gDm').toggleAttribute('aria-busy', on && wantDm); $('#gRoom').toggleAttribute('aria-busy', on && !wantDm); if (!on) { $('#enter').textContent = '입장하기'; $('#inboxBtn').lastChild.textContent = '쪽지함'; } else (wantDm ? $('#inboxBtn').lastChild : $('#enter')).textContent = '들어가는 중'; };
 $('#enter').onclick = () => { wantDm = false; };
+
+/* ---------- 입장 화면의 단계: 로그인·가입 → 쪽지/그룹방 → (프로필을 아직 안 정했으면) 프로필 설정 ----------
+   주소에 ?step=profile 이 있으면 예전처럼 한 화면(닉네임·프로필·두 입장 버튼)으로 바로 연다 (자동 점검 도구가 쓴다). */
+const JOIN_DIRECT = new URLSearchParams(location.search).get('step') === 'profile';
+let joinStepName = '', joinDest = 'gc', joinGuest = false; // joinDest: 'gc' | 'dm' | null(프로필만 바꾸는 중)
+const profileDone = () => JOIN_DIRECT || (loggedIn() && get('profDone') === get('acctName')); // 이 기기에서 이 계정의 프로필을 이미 정했는가
+function joinStep(step, focus) {
+  joinStepName = step;
+  const f = $('#joinForm'); f.dataset.step = step;
+  $('#gateAuth').hidden = step !== 'auth'; $('#gatePick').hidden = step !== 'pick';
+  const acct = loggedIn(), direct = JOIN_DIRECT;
+  $('#pickWho').textContent = get('acctName') || '';
+  // 프로필 단계: 고른 곳에 맞는 버튼만 보인다 (직접 열기에서는 둘 다)
+  $('#enter').hidden = !(direct || !acct || joinDest === 'gc');
+  $('#inboxBtn').hidden = $('#inboxNote').hidden = !(direct || (acct && joinDest === 'dm')); // (직접 열기에서는 로그인 전에도 쪽지함 버튼이 보이고, 누르면 로그인 창이 열린다)
+  $('#profileOk').hidden = !(acct && !direct && joinDest === null);
+  $('#joinBack').hidden = direct;
+  if (step === 'profile' && !direct) $('#makeWrap').open = true; // 프로필 설정 단계에서는 폰에서도 꾸미기 칸을 펼쳐 둔다
+  $('#acctBox').hidden = !direct; // 로그인·로그아웃은 앞 단계에서 한다
+  $('#meLede').textContent = joinDest === null ? '프로필을 바꿔 보세요.' : acct ? '처음 한 번만 정하면 돼요. 먼저 나를 꾸며 보세요.' : '닉네임을 정하고 나를 꾸며 보세요.';
+  const skip = { auth: ['#gLogin', '로그인 버튼으로 건너뛰기'], pick: ['#gDm', '쪽지·그룹방 선택으로 건너뛰기'], profile: ['#nameIn', '닉네임 입력으로 건너뛰기'] }[step];
+  $('.skip').setAttribute('href', skip[0]); $('.skip').textContent = skip[1];
+  if (focus) $(skip[0] === '#nameIn' && acct ? '#enter:not([hidden]), #inboxBtn:not([hidden]), #profileOk:not([hidden])' : skip[0])?.focus();
+}
+// 로그인 상태에 맞는 단계로 (로그인하면 선택 화면, 로그아웃하면 처음). 프로필 단계를 보는 중이면 그대로 둔다
+function joinAuto(focus) {
+  if (JOIN_DIRECT) return joinStep('profile');
+  if (loggedIn()) return joinStep(joinStepName === 'profile' ? 'profile' : 'pick', focus);
+  joinStep(joinStepName === 'profile' && joinGuest ? 'profile' : 'auth', focus);
+}
+// 쪽지/그룹방을 골랐을 때: 프로필을 아직 안 정했으면 먼저 정하고, 정했으면 바로 들어간다
+function joinGo(dest) {
+  joinDest = dest; wantDm = dest === 'dm';
+  if (profileDone()) return $('#joinForm').requestSubmit();
+  $('#joinMsg').textContent = ''; joinStep('profile', true);
+}
+$('#gLogin').onclick = () => openAuth('login');
+$('#gSignup').onclick = () => openAuth('signup');
+$('#gGuest').onclick = () => { joinGuest = true; joinDest = 'gc'; $('#joinMsg').textContent = ''; joinStep('profile', true); };
+$('#gDm').onclick = () => joinGo('dm');
+$('#gRoom').onclick = () => joinGo('gc');
+$('#gProfile').onclick = () => { joinDest = null; $('#joinMsg').textContent = ''; joinStep('profile', true); };
+$('#gLogout').onclick = () => logout(false);
+$('#profileOk').onclick = () => { set('profDone', get('acctName')); joinDest = 'gc'; joinStep('pick', true); };
+$('#joinBack').onclick = () => { joinGuest = false; $('#joinMsg').textContent = ''; joinStepName = ''; joinAuto(true); };
 $('#inboxBtn').onclick = () => {
   if (!loggedIn()) return openAuth('login', '쪽지함은 로그인한 사람만 쓸 수 있어요.'); // 쪽지는 로그인한 계정끼리만
   wantDm = true; $('#joinForm').requestSubmit();
@@ -159,6 +204,7 @@ $('#joinForm').onsubmit = (e) => {
   if (!name) { $('#joinMsg').textContent = '닉네임을 입력해 주세요.'; return $('#nameIn').focus(); }
   if (!loggedIn() && (!NICK_RE.test(name) || !NICK_LETTER.test(name))) { $('#joinMsg').textContent = NAME_HELP; return $('#nameIn').focus(); }
   $('#joinMsg').textContent = '';
+  if (loggedIn() && joinStepName === 'profile') set('profDone', name); // 프로필 단계를 거쳤으면 다음부터는 묻지 않는다
   if (!loggedIn()) set('name', name);
   setJoinBusy(true);
   connect(name);
@@ -186,11 +232,13 @@ const setTopH = () => { const h = $('.top')?.offsetHeight; document.documentElem
 const showNet = (t) => { const n = $('#net'); setTopH(); n.textContent = t; n.hidden = false; };
 const hideNet = () => { clearTimeout(netTimer); $('#net').hidden = true; };
 // 서버가 새 버전이라고 알려 오면(열어 둔 탭·설치한 앱이 옛 화면일 때) 새로고침 버튼을 보여 준다. 음성·공유를 쓰는 중에 멋대로 새로고침하지는 않는다.
-function offerUpdate() {
+function offerUpdate(latest) {
   if ($('#upd')) return;
+  try { if (latest && sessionStorage.getItem('updHide') === latest) return; } catch {} // "나중에"를 누른 같은 버전이면 다시 띄우지 않는다
   setTopH();
-  document.body.append(el('div', { id: 'upd', role: 'status' }, '새 버전이 나왔어요. 새로고침하면 새 기능이 적용돼요.',
-    el('button', { className: 'btn primary', type: 'button', textContent: '새로고침', onclick: () => location.reload() })));
+  document.body.append(el('div', { id: 'upd', role: 'status' }, '새 버전이 나왔어요.',
+    el('button', { className: 'btn primary', type: 'button', textContent: '새로고침', onclick: () => forceRefresh() }),
+    el('button', { className: 'btn link', type: 'button', id: 'updLater', textContent: '나중에', onclick: () => { try { sessionStorage.setItem('updHide', latest || '1'); } catch {} $('#upd')?.remove(); } })));
 }
 
 function connect(name) {
@@ -334,7 +382,7 @@ Object.assign(handlers, {
     if (m.me.acct) { set('acctName', m.me.name); myPrev = m.me.prev || ''; acctUi(); }
     const wasReconnecting = reconnecting;
     reconnecting = false; hideNet(); startHeartbeat();
-    if (m.build && BUILD && m.build !== BUILD) offerUpdate();
+    if (m.build && BUILD && m.build !== BUILD) offerUpdate(m.build);
     if (m.resumed) return applyResume(m, wasReconnecting); // 끊기기 전 세션을 그대로 이어받음: 음성·공유·화면 상태 유지
     if (firstJoined) { // 오래 끊겼거나 서버가 다시 켜져서 새로 입장함: 서버가 음성·공유 상태를 잊었으니 이쪽도 정리
       try { stopEverything(); } catch (e) { console.warn(e); }
@@ -355,9 +403,11 @@ Object.assign(handlers, {
     if (m.yt) applyYt(m.yt);
     if (m.sharer) { sharerId = m.sharer; requestShare(); }
     renderStage();
-    if (dmOnly) { $('.logo .t').textContent = '쪽지함'; showTab('dm'); return; } // 방 안내와 채팅 입력 칸은 쓰지 않는다
+    if (dmOnly) { $('.logo .t').textContent = '쪽지함'; showTab('dm'); tourMaybe('dm'); notifAskSoon(); return; } // 방 안내와 채팅 입력 칸은 쓰지 않는다
     sys(isHost ? '이 방의 호스트예요. 참가자 탭에서 사람을 누르면 대기열 허락·호스트 넘기기·강퇴·밴 메뉴가 열려요.' : m.me.acct ? '입장했어요. 참가자 탭에서 사람을 누르면 쪽지를 보낼 수 있어요.' : '입장했어요. 쪽지는 로그인한 사람끼리만 주고받을 수 있어요. (설정 → 계정)');
-    if (matchMedia('(pointer:fine)').matches) $('#chatIn').focus(); // 터치 기기에선 키보드가 갑자기 올라오지 않게
+    if (matchMedia('(pointer:fine)').matches) $('#chatIn').focus();
+    tourMaybe('room'); // 처음이면 그룹방 안내
+    notifAskSoon(); // 로그인한 사람에게는 쪽지 알림 권한도 (안내가 끝난 뒤) // 터치 기기에선 키보드가 갑자기 올라오지 않게
   },
   'name-invalid'() { nameBad = true; }, // 서버가 닉네임 규칙에 안 맞다고 거절 (곧 연결을 닫는다)
   'name-taken'(m) { nameTaken = m.name; }, // 곧 서버가 연결을 닫는다. 닫힘 처리에서 안내를 보여 준다
@@ -420,12 +470,14 @@ function renderUsers() {
     const canOpen = u.id !== me;                              // 나를 뺀 모두에게 메뉴 (쪽지는 로그인한 사람끼리만)
     const canBan = isHost && !u.host && !u.admin;             // 호스트(와 관리자)만 강퇴·밴. 호스트·관리자는 대상이 아님
     const row = el(canOpen ? 'button' : 'div', { className: 'urow' });
-    row.append(avEl(u), el('span', { className: 'nm' }, el('span', { textContent: u.name + (u.id === me ? ' (나)' : '') }), u.prev ? el('small', { className: 'prev', textContent: '이전: ' + u.prev }) : ''));
-    if (u.away) { row.classList.add('away'); row.append(el('span', { className: 'tag soft', title: '연결이 끊겼어요. 돌아오면 그대로 이어져요', textContent: '자리 비움' })); }
-    if (DEVICE_LABEL[u.device]) { const dv = el('span', { className: 'tag soft dev' }, icon(DEVICE_ICON[u.device]), DEVICE_LABEL[u.device]); row.append(dv); }
-    if (u.host) row.append(tag('호스트')); else if (u.admin) row.append(tag('관리자')); else if (u.canQueue) row.append(tag('대기열 가능', true));
-    if (u.acct && !u.admin) row.append(tag('계정', true));
-    if (u.id === sharerId) row.append(tag('공유 중', true));
+    // 첫 줄은 닉네임, 그 아래 줄에 상태 꼬리표를 모은다 (여러 개여도 닉네임이 줄어들지 않고, 넘치면 다음 줄로)
+    const tags = el('span', { className: 'tags' });
+    if (u.away) { row.classList.add('away'); tags.append(el('span', { className: 'tag soft', title: '연결이 끊겼어요. 돌아오면 그대로 이어져요', textContent: '자리 비움' })); }
+    if (u.host) tags.append(tag('호스트')); else if (u.admin) tags.append(tag('관리자')); else if (u.canQueue) tags.append(tag('대기열 가능', true));
+    if (u.acct && !u.admin) tags.append(tag('계정', true));
+    if (u.id === sharerId) tags.append(tag('공유 중', true));
+    if (DEVICE_LABEL[u.device]) tags.append(el('span', { className: 'tag soft dev', title: DEVICE_LABEL[u.device] }, icon(DEVICE_ICON[u.device]), el('span', { className: 'sr', textContent: DEVICE_LABEL[u.device] })));
+    row.append(avEl(u), el('span', { className: 'nm' }, el('span', { textContent: u.name + (u.id === me ? ' (나)' : '') }), u.prev ? el('small', { className: 'prev', textContent: '이전: ' + u.prev }) : '', tags.children.length ? tags : ''));
     const vo = voiceList.find((x) => x.id === u.id);
     if (vo) { const vi = icon(vo.muted ? 'i-mic-off' : 'i-mic'); vi.setAttribute('class', 'i vi'); vi.setAttribute('role', 'img'); vi.setAttribute('aria-label', vo.muted ? '음성 참가 중, 마이크 꺼짐' : '음성 참가 중'); row.append(vi); }
     if (canOpen) {
@@ -506,7 +558,7 @@ function showTab(name) {
     $('#tab-' + n).tabIndex = n === name ? 0 : -1;
     $('#p-' + n).hidden = n !== name;
   }
-  if (name === 'dm') dmShown();
+  if (name === 'dm') { dmShown(); tourMaybe('dm'); } // 쪽지 탭을 처음 열면 쪽지 안내
   if (name === 'chat') { unread = 0; setDot('chat', 0); const c = $('#chat'); c.scrollTop = c.scrollHeight; }
 }
 TABS.forEach((n, i) => {
@@ -523,4 +575,5 @@ TABS.forEach((n, i) => {
 // 쪽지함에서 '방에 들어가기'로 새로 열린 화면이면 바로 입장한다 (모든 스크립트가 올라온 뒤에)
 addEventListener('load', () => { try { if (sessionStorage.getItem('autoJoin') && (get('name') || loggedIn())) { sessionStorage.removeItem('autoJoin'); $('#joinForm').requestSubmit(); } } catch {} });
 fetch('/healthz', { cache: 'no-store' }).then((r) => { if (!r.ok) showServerDown(); }).catch(() => showServerDown());
-$('#nameIn').focus();
+// (처음 화면의 단계는 auth.js 맨 끝의 authUi() 가 joinAuto() 로 정한다. 로그인 상태 함수가 auth.js 에 있어서 여기서는 부를 수 없다)
+if (JOIN_DIRECT) $('#nameIn').focus();

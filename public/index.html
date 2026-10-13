@@ -4,14 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#1b1530">
+<meta name="theme-color" content="#1e1f22">
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icons/icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="시루 그룹챗">
-<script>try{var t=localStorage.getItem('theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var t=localStorage.getItem('theme');if(t&&t!=='auto')document.documentElement.dataset.theme=t;if(t==='custom'){var v=JSON.parse(localStorage.getItem('themeVars')||'{}');for(var k in v)document.documentElement.style.setProperty(k,v[k])}var o=JSON.parse(localStorage.getItem('bgOpts')||'{}');if(o.on)document.documentElement.classList.add('has-bg')}catch(e){}</script>
 <title>시루 그룹챗</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,11 +23,15 @@
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
   <symbol id="i-screen" viewBox="0 0 24 24"><path d="m9 10 3-3 3 3"/><path d="M12 13V7"/><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect width="14" height="14" x="5" y="5" rx="2"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+  <symbol id="i-back10" viewBox="0 0 24 24"><polygon points="11 5 3 12 11 19 11 5"/><polygon points="21 5 13 12 21 19 21 5"/></symbol>
+  <symbol id="i-fwd10" viewBox="0 0 24 24"><polygon points="13 5 21 12 13 19 13 5"/><polygon points="3 5 11 12 3 19 3 5"/></symbol>
   <symbol id="i-skip" viewBox="0 0 24 24"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" x2="19" y1="5" y2="19"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
@@ -58,20 +62,51 @@
 <!-- ===== 입장: 캐릭터 메이커 ===== -->
 <main class="join" id="join">
   <button type="button" class="btn join-set" id="joinSettings" aria-haspopup="dialog"><svg class="i"><use href="#i-sliders"/></svg>테마·설정</button>
-  <form class="maker" id="joinForm" novalidate>
+  <form class="maker" id="joinForm" data-step="auth" novalidate>
+    <p class="msg-err" id="joinMsg" role="alert"></p>
+    <!-- 1단계: 로그인 / 가입 -->
+    <section class="gate" id="gateAuth" aria-labelledby="gaTitle">
+      <div>
+        <h1 id="gaTitle">시루 그룹챗</h1>
+        <p class="lede">같이 영상을 보고 이야기하는 방이에요. 로그인하면 쪽지도 쓸 수 있어요.</p>
+      </div>
+      <div class="gate-btns">
+        <button class="btn primary enter" id="gLogin" type="button">로그인</button>
+        <button class="btn enter-alt" id="gSignup" type="button">가입하기</button>
+      </div>
+      <p class="gate-note" id="gateNote" hidden></p>
+      <button class="btn link" id="gGuest" type="button">로그인 없이 그룹방만 둘러보기</button>
+    </section>
+    <!-- 2단계: 쪽지 / 그룹방 -->
+    <section class="gate" id="gatePick" aria-labelledby="gpTitle" hidden>
+      <div>
+        <h1 id="gpTitle">시루 그룹챗</h1>
+        <p class="lede"><b id="pickWho"></b> 님, 어디로 갈까요?</p>
+      </div>
+      <div class="dests">
+        <button class="dest" id="gDm" type="button"><svg class="i"><use href="#i-mail"/></svg><b>쪽지</b><small>방에 들어가지 않고 쪽지만 주고받아요</small></button>
+        <button class="dest" id="gRoom" type="button"><svg class="i"><use href="#i-tv"/></svg><b>그룹방</b><small>같이 영상 보고 이야기하는 방이에요</small></button>
+      </div>
+      <div class="gate-row">
+        <button class="btn sm" id="gProfile" type="button">프로필 바꾸기</button>
+        <button class="btn sm" id="gLogout" type="button">로그아웃</button>
+      </div>
+    </section>
+    <!-- 3단계: 프로필 설정 (아직 안 했을 때) -->
     <div class="me">
+      <button class="btn sm back" id="joinBack" type="button">← 뒤로</button>
       <div>
         <h1>시루 그룹챗</h1>
-        <p class="lede">같이 영상을 보고 이야기하는 방이에요. 먼저 나를 꾸며 보세요.</p>
+        <p class="lede" id="meLede">먼저 나를 꾸며 보세요.</p>
       </div>
       <span class="av xl" id="preview" role="img" aria-label="내 아바타 미리보기"></span>
       <label class="field"><span id="nameLbl">닉네임</span>
         <input type="text" id="nameIn" maxlength="20" autocomplete="nickname" placeholder="한글·영문·숫자, 최대 20자" required>
       </label>
-      <p class="msg-err" id="joinMsg" role="alert"></p>
       <div class="acct" id="acctBox"></div>
       <div class="actions">
         <button class="btn primary enter" id="enter" type="submit">입장하기</button>
+        <button class="btn primary enter" id="profileOk" type="button" hidden>확인</button>
         <button class="btn enter-alt" id="inboxBtn" type="button" aria-describedby="inboxNote"><svg class="i"><use href="#i-mail"/></svg>쪽지함</button>
         <p class="inbox-note" id="inboxNote">쪽지함은 방에 들어가지 않고 쪽지만 주고받는 화면이에요. 로그인이 필요하고, 방 사람들에게는 보이지 않아요.</p>
       </div>
@@ -124,6 +159,7 @@
     </div>
     </details>
   </form>
+  <button type="button" class="btn link" id="forceRefresh">화면이 예전 그대로면 눌러 주세요 · 최신 화면으로 새로고침</button>
 </main>
 
 <!-- ===== 방 ===== -->
@@ -136,7 +172,7 @@
       <button class="btn blue" id="shareBtn" type="button"><svg class="i" id="shareIcon"><use href="#i-screen"/></svg><span class="lbl" id="shareLbl">화면 공유</span></button>
     </div>
     <div class="top-util">
-      <button class="btn" id="soundBtn" type="button" aria-pressed="false" aria-label="모든 소리 끄기" title="모든 소리 끄기"><svg class="i" id="soundIcon"><use href="#i-volume"/></svg><span class="lbl" id="soundLbl">소리 끄기</span></button>
+      <button class="btn" id="soundBtn" type="button" aria-pressed="false" aria-label="소리 전부 끄기" title="소리 전부 끄기"><svg class="i" id="soundIcon"><use href="#i-volume"/></svg><span class="lbl" id="soundLbl">소리 전부 끄기</span></button>
       <button class="btn icon" id="panicBtn" type="button" aria-label="패닉: 소리를 끄고 화면 보호기 켜기" title="패닉: 소리 끄고 화면 보호기 (Esc 두 번)"><span aria-hidden="true">🛑</span></button>
       <button class="btn icon" id="settingsBtn" type="button" aria-haspopup="dialog" aria-label="설정" title="설정"><svg class="i"><use href="#i-sliders"/></svg></button>
     </div>
@@ -238,6 +274,7 @@
         <header class="thr-h">
           <button class="btn icon" id="dmBack" type="button" aria-label="쪽지 목록으로" title="쪽지 목록으로"><svg class="i"><use href="#i-back"/></svg></button>
           <span id="dmWho" class="thr-who"></span>
+          <button class="btn sm enc" id="dmEnc" type="button" aria-haspopup="dialog" title="이 대화가 암호화되는지 확인해요"><svg class="i"><use href="#i-lock"/></svg><span id="dmEncTxt">암호화됨</span></button>
           <div class="menu-wrap">
             <button class="btn icon" id="dmMore" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="dmMenu" aria-label="더 보기" title="더 보기"><svg class="i"><use href="#i-more"/></svg></button>
             <div class="menu" id="dmMenu" role="menu" hidden>
@@ -247,6 +284,7 @@
           </div>
         </header>
         <p class="note blk" id="dmBlockedNote" hidden>차단한 사람이에요. 이 사람의 쪽지는 오지 않고, 쪽지도 보낼 수 없어요. 위의 ⋯ 버튼에서 "차단 해제"를 누르면 풀려요.</p>
+        <p class="note blk warn" id="dmKeyWarn" role="alert" hidden><span>상대의 보안 키가 바뀌었어요. 새 기기에서 로그인했거나 비밀번호를 초기화했을 수 있어요. 안전번호를 다시 확인해 주세요.</span> <button type="button" class="btn sm" id="dmKeyWarnGo">안전번호 보기</button> <button type="button" class="btn sm" id="dmKeyAccept">알겠어요</button></p>
         <div class="chat scroll" id="dmMsgs" role="log" aria-label="쪽지 내용"></div>
         <form class="send" id="dmForm">
           <button class="btn icon" type="button" id="dmAttachBtn" aria-label="쪽지에 사진·동영상 첨부" title="사진·동영상 첨부"><svg class="i"><use href="#i-clip"/></svg></button>
@@ -260,6 +298,33 @@
   </aside>
 </div>
 
+<!-- 쪽지 알림 권한 안내 (브라우저의 알림 허용 창을 띄우기 전에 이유를 알려 준다) -->
+<div id="notifAsk" role="dialog" aria-labelledby="naTitle" hidden>
+  <h2 id="naTitle">쪽지 알림을 받을까요?</h2>
+  <p id="naBody">앱이 닫혀 있거나 다른 화면을 보고 있어도 쪽지가 오면 알려 줘요. 다음에 뜨는 브라우저 창에서 "허용"을 눌러 주세요.</p>
+  <p class="note" id="naMsg" role="status"></p>
+  <div class="na-btns"><button type="button" class="btn link" id="naLater">나중에</button><button type="button" class="btn primary" id="naOn">알림 켜기</button></div>
+</div>
+<!-- 쪽지 암호화 확인: 안전번호, 서버가 보관하는 모습 -->
+<dialog id="encDlg" class="dlg enc-dlg" aria-labelledby="encTitle">
+  <form method="dialog" class="dlg-in">
+    <header class="dlg-h"><h2 id="encTitle">암호화 확인</h2><button class="btn icon" id="encClose" type="button" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="dlg-b enc-b">
+      <p class="enc-lead" id="encLead"></p>
+      <h4 class="gt">안전번호</h4>
+      <p class="note">두 사람 화면에 같은 번호가 보이면, 중간에서 누가 바꿔치기하지 않은 거예요. 통화나 직접 만나서 서로 읽어 맞춰 보세요.</p>
+      <div class="safe-num" id="encNum" aria-live="polite"></div>
+      <div class="row"><button type="button" class="btn primary" id="encOk">번호가 같아요</button><button type="button" class="btn" id="encDiff">번호가 달라요</button></div>
+      <p class="note" id="encState" role="status"></p>
+      <h4 class="gt">서버가 보관하는 모습</h4>
+      <p class="note" id="encHow"></p>
+      <div class="enc-cmp">
+        <div><small>서버에 저장된 것</small><code id="encCt"></code></div>
+        <div><small>내 기기에서 푼 것</small><p id="encPt"></p></div>
+      </div>
+    </div>
+  </form>
+</dialog>
 <dialog id="lightbox" class="lb" aria-label="사진 크게 보기"><img id="lbImg" alt="크게 본 사진"></dialog>
 
 <!-- 연결이 끊겼을 때 잠깐 보이는 안내 띠 -->
@@ -272,13 +337,37 @@
   <canvas id="saverCanvas"></canvas>
   <div id="saverClock" aria-hidden="true"></div>
   <div class="lec-shield" id="lecShield" tabindex="0" role="button" aria-label="강의 화면 (눌러서 재생·정지, 10초 동안 누르고 있으면 잠금 해제)"></div>
-  <div class="lec-top"><span id="lecTitle"></span></div>
+  <div class="lec-cover" id="lecCover" aria-hidden="true"><svg class="i play"><use href="#i-play"/></svg><span class="spin"></span></div>
   <div class="lec-bar" id="lecBar">
-    <button id="lecPlay" type="button" aria-label="정지"><svg class="i"><use href="#i-pause"/></svg></button>
-    <span id="lecTime">0:00 / 0:00</span>
     <input type="range" id="lecSeek" min="0" max="1000" value="0" aria-label="재생 위치">
-    <button id="lecMute" type="button" aria-label="소리 켜기"><svg class="i"><use href="#i-volume-x"/></svg></button>
-    <input type="range" id="lecVol" min="0" max="100" value="0" aria-label="볼륨">
+    <div class="lec-row">
+      <div class="lec-left">
+        <div class="lec-time"><small>강의</small><span id="lecTime">0:00 / 0:00</span></div>
+        <div class="lec-main">
+          <button id="lecPlay" class="big" type="button" aria-label="재생"><svg class="i"><use href="#i-play"/></svg></button>
+          <button id="lecStop" type="button" aria-label="정지하고 처음으로"><svg class="i"><use href="#i-stop"/></svg></button>
+          <button id="lecBack" type="button" aria-label="10초 뒤로"><svg class="i"><use href="#i-back10"/></svg></button>
+          <button id="lecFwd" type="button" aria-label="10초 앞으로"><svg class="i"><use href="#i-fwd10"/></svg></button>
+        </div>
+      </div>
+      <div class="lec-mid">
+        <div class="lec-line">
+          <label class="lec-step"><span>화면이동</span><select id="lecStep"><option value="5">5초</option><option value="10" selected>10초</option><option value="30">30초</option><option value="60">1분</option></select></label>
+          <button id="lecLoop" class="pill" type="button" aria-pressed="false">구간반복</button>
+          <button id="lecMark" class="pill" type="button">북마크추가</button>
+        </div>
+        <div class="lec-line"><small>재생속도</small><div id="lecRates" role="group" aria-label="재생 속도"></div></div>
+        <div class="lec-marks" id="lecMarks" aria-label="북마크"></div>
+      </div>
+      <button id="lecRate" type="button" aria-label="재생 속도">1.0x</button>
+      <div class="lec-right">
+        <div class="lec-vol">
+          <button id="lecMute" type="button" aria-label="소리 켜기"><svg class="i"><use href="#i-volume-x"/></svg></button>
+          <input type="range" id="lecVol" min="0" max="100" value="0" aria-label="볼륨"><output id="lecVolN" for="lecVol">0</output>
+        </div>
+        <div class="lec-size"><small>화면크기</small><div id="lecSizes" role="group" aria-label="화면 크기"></div></div>
+      </div>
+    </div>
   </div>
   <div class="lec-hold" id="lecHold" aria-hidden="true"><b id="lecHoldN">3</b></div>
   <form class="lec-auth" id="lecAuth" hidden novalidate>
@@ -314,153 +403,216 @@
   </form>
 </dialog>
 
-<dialog id="settings" class="dlg" aria-labelledby="setTitle">
+<dialog id="settings" class="dlg" aria-labelledby="setTitle" data-view="list">
   <form method="dialog" class="dlg-in">
     <header class="dlg-h">
+      <button class="btn icon" id="setBack" type="button" aria-label="설정 목록으로"><svg class="i"><use href="#i-back"/></svg></button>
       <h2 id="setTitle">설정</h2>
       <button class="btn icon" id="setClose" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button>
     </header>
-    <div class="dlg-b">
-      <section aria-labelledby="hTheme">
-        <h3 id="hTheme">테마</h3>
-        <div id="themeGrid"></div>
-      </section>
-      <section aria-labelledby="hLayout">
-        <h3 id="hLayout">채팅 화면</h3>
-        <label class="field"><span>채팅 글자 크기 <output id="chatSizeOut" for="chatSize">보통</output></span><input type="range" id="chatSize" min="0" max="3" step="1" value="1"></label>
-        <p class="note">영상과 채팅 사이의 선(폰에서는 손잡이)을 끌면 채팅 너비(폰에서는 영상 높이)를 바꿀 수 있어요. 키보드로는 선을 선택하고 방향키를 누르세요. 두 번 누르면 원래대로 돌아가요.</p>
-        <div><button type="button" class="btn" id="layoutReset">크기 모두 되돌리기</button></div>
-      </section>
-      <section aria-labelledby="hVoice">
-        <h3 id="hVoice">음성</h3>
-        <label class="field"><span>목소리 필터</span><select id="vfSel"></select></label>
-        <label class="field"><span>마이크 입력 크기 <output id="micGainOut" for="micGain">100%</output></span><input type="range" id="micGain" min="0" max="200" step="5" value="100"></label>
-        <label class="chk"><input type="checkbox" id="nsOn"><span>잡음 억제</span></label>
-        <label class="chk"><input type="checkbox" id="ecOn"><span>에코 제거</span></label>
-        <label class="chk"><input type="checkbox" id="agcOn"><span>자동 음량 조절</span></label>
-        <label class="chk"><input type="checkbox" id="monOn"><span>내 목소리 들어 보기 (이어폰을 끼세요)</span></label>
-        <p class="note">필터와 입력 크기는 다른 사람에게 들리는 내 목소리에 적용돼요. 음성에 참가한 뒤에도 바꿀 수 있어요. 다른 사람의 목소리 크기는 참가자 탭에서 그 사람을 눌러 조절해요.</p>
-      </section>
-      <section aria-labelledby="hNotif" id="notifSec">
-        <h3 id="hNotif">알림</h3>
-        <label class="chk"><input type="checkbox" id="pushOn"><span>이 기기에서 알림 받기</span></label>
-        <p class="note" id="pushNote"></p>
-        <label class="chk"><input type="checkbox" id="dmOn"><span>쪽지가 오면 알림</span></label>
-        <label class="chk"><input type="checkbox" id="dingOn"><span>쪽지가 오면 앱 안에서 소리</span></label>
-        <div><button type="button" class="btn" id="pushTest">테스트 알림 보내기</button></div>
-      </section>
-      <section aria-labelledby="hSpoof">
-        <h3 id="hSpoof">알림 위장</h3>
-        <p class="note">수업 중에 알림이 떠도 눈에 띄지 않게, 알림의 이름·내용·아이콘을 평범한 것으로 바꿔요. 보낸 사람과 쪽지 내용은 알림에 실리지 않아요.</p>
-        <label class="field"><span>위장 방식</span><select id="spoofSel"></select></label>
-        <label class="chk"><input type="checkbox" id="tabSpoof"><span>탭 제목과 아이콘도 같은 걸로 바꾸기</span></label>
-        <div class="spoof-prev" id="spoofPrev" aria-live="polite"></div>
-      </section>
-      <section aria-labelledby="hPanic">
-        <h3 id="hPanic">소리와 패닉</h3>
-        <p class="note">헤더의 스피커 버튼은 영상·공유 화면·음성의 소리를 모두 꺼요. 눈 모양 패닉 버튼(또는 <kbd>Esc</kbd>를 빠르게 두 번)은 소리와 내 마이크를 끄고, 채팅 위에 강의 영상을 전체 화면으로 띄워요. 마우스를 움직이면 강의 플레이어 컨트롤이 나와요. <b>풀려면 화면을 한 번 누른 채 10초 동안 있다가</b> 비밀번호(게스트는 4자리 PIN)를 넣어요. 소리는 꺼진 채로 남아요.</p>
-        <label class="chk"><input type="checkbox" id="panicPre"><span>강의를 소리 없이 미리 재생해 두기 (끄면 패닉을 누를 때 불러와요. 켜 두면 데이터와 배터리를 조금 써요)</span></label>
-        <label class="field"><span>강의 영상 바꾸기 (유튜브 링크. 비우면 기본 강의)</span><input type="text" id="panicVideoIn" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…"></label>
-        <div><button type="button" class="btn" id="panicVideoGo">영상 저장</button></div>
-        <p class="note" id="panicMsg" role="status"></p>
-        <div id="pinBox">
-          <p class="note" id="pinNow"></p>
-          <div class="row"><label class="field"><span>새 PIN (숫자 4자리)</span><input type="password" id="pinNew" inputmode="numeric" maxlength="4" autocomplete="off"></label><button type="button" class="btn" id="pinGo">PIN 저장</button></div>
-          <p class="note" id="pinMsg" role="status"></p>
-        </div>
-        <p class="note" id="pinAcct" hidden>로그인한 사람은 계정 비밀번호로 풀어요. PIN은 게스트만 써요. (PIN을 잊으면 브라우저의 이 사이트 데이터를 지우세요.)</p>
-      </section>
-      <section aria-labelledby="hApp">
-        <h3 id="hApp">앱으로 설치</h3>
-        <p class="note" id="installNote"></p>
-        <button type="button" class="btn primary" id="installBtn" hidden>앱으로 설치</button>
-        <div class="guide" id="installGuide">
-          <p class="note">설치하면 주소창 없이 앱처럼 열리고, 쪽지가 오면 앱이 닫혀 있어도 알림을 받을 수 있어요. 아래에서 쓰는 기기를 골라 따라 해 보세요. 메뉴 이름은 기기와 버전에 따라 조금 달라요.</p>
-          <details id="gIos">
-            <summary>iPhone·iPad</summary>
-            <ol>
-              <li><b>Safari</b>로 이 주소를 열어요. 카카오톡·인스타그램 같은 앱 안에서 열린 화면이라면, 먼저 메뉴에서 "Safari로 열기"를 눌러요.</li>
-              <li><b>공유 버튼</b>을 눌러요. 네모 위로 화살표가 나온 모양이에요. iPhone은 화면 아래(안 보이면 ⋯ 메뉴 안), iPad는 오른쪽 위에 있어요.</li>
-              <li>메뉴를 위로 밀어 <b>"홈 화면에 추가"</b>를 눌러요. 안 보이면 목록 맨 아래의 "더 보기"를 눌러 찾아요.</li>
-              <li>이름은 그대로 두고 오른쪽 위의 <b>"추가"</b>를 눌러요. "웹 앱으로 열기" 스위치가 보이면 켜 둔 채로 두세요.</li>
-              <li>홈 화면에 생긴 <b>아이콘으로 앱을 열어요</b>. 주소창이 없으면 앱으로 열린 거예요.</li>
-              <li>앱 안에서 설정 → 알림 → <b>"이 기기에서 알림 받기"</b>를 켜고 "허용"을 눌러요.</li>
-            </ol>
-            <p class="note">알림은 iOS·iPadOS <b>16.4 이상</b>에서, <b>홈 화면 아이콘으로 연 앱</b>에서만 켤 수 있어요. Safari 탭에서는 켜지지 않아요. 홈 화면 앱은 Safari와 저장 공간이 따로라서, 처음 열면 닉네임과 프로필을 다시 정해야 할 수 있어요.</p>
-          </details>
-          <details id="gAnd">
-            <summary>Android 폰·태블릿 (Chrome)</summary>
-            <ol>
-              <li><b>Chrome</b>으로 이 주소를 열어요. 카카오톡 같은 앱 안에서 열린 화면이라면, 메뉴(⋮)에서 "다른 브라우저로 열기"를 눌러 Chrome으로 열어요.</li>
-              <li>오른쪽 위의 <b>⋮ 메뉴</b>를 눌러요.</li>
-              <li><b>"앱 설치"</b>를 눌러요. 이 항목이 없고 "홈 화면에 추가"만 보이면, 그걸 누른 뒤 나오는 창에서 "설치"를 골라요. 이 설정 창의 "앱으로 설치" 버튼이 보이면 그 버튼을 눌러도 같아요.</li>
-              <li>확인 창에서 <b>"설치"</b>를 누르면 홈 화면과 앱 목록에 아이콘이 생겨요.</li>
-              <li>아이콘으로 앱을 열고 설정 → 알림 → <b>"이 기기에서 알림 받기"</b>를 켜고 "허용"을 눌러요.</li>
-            </ol>
-          </details>
-          <details id="gSam">
-            <summary>삼성 인터넷</summary>
-            <ol>
-              <li><b>삼성 인터넷</b>으로 이 주소를 열어요.</li>
-              <li>주소창 오른쪽에 설치 아이콘이 보이면 눌러서 "설치"를 골라요. 안 보이면 아래쪽 <b>☰ 메뉴</b> → <b>"현재 페이지 추가"</b> → <b>"홈 화면"</b>을 눌러요.</li>
-              <li>"추가"를 누르면 홈 화면에 아이콘이 생겨요. 아이콘으로 앱을 열고 설정 → 알림에서 알림을 켜요.</li>
-            </ol>
-          </details>
-          <details id="gFix">
-            <summary>알림이 오지 않을 때</summary>
-            <ul>
-              <li>설정의 "이 기기에서 알림 받기"가 켜져 있는지 보고, "테스트 알림 보내기"를 눌러 확인해요.</li>
-              <li><b>iPhone·iPad</b>: 설정 앱 → 알림 → "시루 그룹챗"에서 "알림 허용"이 켜져 있는지 확인해요. 집중 모드나 방해 금지가 켜져 있어도 알림이 숨겨져요.</li>
-              <li><b>Android</b>: 설정 → 앱 → "시루 그룹챗" → 알림이 허용돼 있는지 확인해요. 배터리 설정에서 이 앱을 "제한 없음"(삼성은 "절전 예외 앱")으로 두면 화면이 꺼져 있어도 더 잘 와요.</li>
-              <li>알림 위장을 켜 두었다면 알림의 이름과 내용이 다르게 보여요. 설정의 "알림 위장"에서 확인해요.</li>
-            </ul>
-          </details>
-        </div>
-      </section>
-      <section aria-labelledby="hAcct">
-        <h3 id="hAcct">계정</h3>
-        <div id="acctGuest">
-          <p class="note" id="acctGuestNote"></p>
-          <button type="button" class="btn primary" id="acctLogin">로그인 · 가입</button>
-        </div>
-        <div id="acctIn" hidden>
-          <p class="note" id="acctInfo"></p>
-          <div class="row">
-            <label class="field"><span>닉네임 바꾸기 (7일에 한 번)</span><input type="text" id="renIn" maxlength="20" autocomplete="off"></label>
-            <button type="button" class="btn" id="renGo">바꾸기</button>
+    <div class="set-wrap">
+      <nav class="set-nav" id="setNav" aria-label="설정 분류"></nav>
+      <div class="dlg-b set-pane" id="setPane">
+
+        <!-- 화면 -->
+        <section class="set-page" id="pgLook" aria-labelledby="hLook">
+          <h3 id="hLook">화면</h3>
+          <h4 class="gt">테마</h4>
+          <div id="themeGrid"></div>
+          <h4 class="gt">나만의 색</h4>
+          <div class="sgroup" id="cuBox">
+            <label class="srow"><span class="st"><b>배경색</b><small>글자색은 읽기 편하게 자동으로 정해요.</small></span><input type="color" class="clr" id="cuBg" value="#1e1f22"></label>
+            <label class="srow"><span class="st"><b>강조색</b><small>버튼과 선택 표시에 써요.</small></span><input type="color" class="clr" id="cuAcc" value="#4f5bd5"></label>
+            <div class="srow"><span class="st"><b>기본값으로</b></span><button type="button" class="btn" id="cuReset">되돌리기</button></div>
           </div>
-          <p class="note" id="renMsg" role="status"></p>
-          <details class="sub"><summary>비밀번호 바꾸기</summary>
-            <label class="field"><span>지금 비밀번호</span><input type="password" id="pwOld" autocomplete="current-password"></label>
-            <label class="field"><span>새 비밀번호 (8자 이상)</span><input type="password" id="pwNew" maxlength="64" autocomplete="new-password"></label>
-            <label class="field"><span>새 비밀번호 한 번 더</span><input type="password" id="pwNew2" maxlength="64" autocomplete="new-password"></label>
-            <div><button type="button" class="btn" id="pwGo">비밀번호 바꾸기</button></div>
-            <p class="note" id="pwMsg" role="status"></p>
-          </details>
-          <div class="row">
-            <button type="button" class="btn" id="logoutBtn">이 기기에서 로그아웃</button>
-            <button type="button" class="btn" id="logoutAllBtn">모든 기기에서 로그아웃</button>
+          <h4 class="gt">배경 이미지</h4>
+          <div class="sgroup" id="bgBox">
+            <div class="srow"><span class="st"><b>내 사진을 배경으로</b><small>이 기기에만 저장돼요. 어떤 테마와도 같이 쓸 수 있어요.</small></span><span class="srow-btns"><button type="button" class="btn" id="bgPick">사진 고르기</button><button type="button" class="btn" id="bgClear" hidden>지우기</button></span><input type="file" id="bgFile" accept="image/*" hidden></div>
+            <label class="srow rng bgopt" hidden><span class="st"><b>어둡게</b><small>글자가 잘 읽히게 사진을 덮어요.</small></span><output id="bgDimOut" for="bgDim">55%</output><input type="range" id="bgDim" min="0" max="90" step="5" value="55"></label>
+            <label class="srow rng bgopt" hidden><span class="st"><b>흐리게</b></span><output id="bgBlurOut" for="bgBlur">0px</output><input type="range" id="bgBlur" min="0" max="20" step="1" value="0"></label>
+            <label class="srow rng bgopt" hidden><span class="st"><b>패널 불투명도</b><small>낮을수록 사진이 더 비쳐요.</small></span><output id="bgSurfOut" for="bgSurf">85%</output><input type="range" id="bgSurf" min="50" max="100" step="5" value="85"></label>
           </div>
-          <details class="sub"><summary>계정 삭제</summary>
-            <p class="note">삭제하면 되돌릴 수 없어요. 내 닉네임은 다른 사람이 쓸 수 있게 되고, 내가 보낸 쪽지는 상대 화면에 "탈퇴한 사용자"로 남아요.</p>
-            <label class="field"><span>비밀번호 확인</span><input type="password" id="delPw" autocomplete="current-password"></label>
-            <div><button type="button" class="btn danger" id="delGo">계정 삭제</button></div>
-            <p class="note" id="delMsg" role="status"></p>
+          <h4 class="gt">채팅</h4>
+          <div class="sgroup">
+            <label class="srow rng"><span class="st"><b>채팅 글자 크기</b></span><output id="chatSizeOut" for="chatSize">보통</output><input type="range" id="chatSize" min="0" max="3" step="1" value="1"></label>
+            <div class="srow stack"><div class="chat look-prev" id="lookPrev" role="img" aria-label="채팅 글자 크기 미리보기">
+              <div class="m"><span class="av" style="--c:#7aa2ff">하</span><div class="bubble" style="--c:#7aa2ff"><header><b>하늘</b><time>오후 3:12</time></header><p>오늘 같이 영상 볼래?</p></div></div>
+              <div class="m mine"><span class="av" style="--c:#6ee7b7">나</span><div class="bubble" style="--c:#6ee7b7"><header><b>나</b><time>오후 3:13</time></header><p>좋아! 대기열에 올려 둘게</p></div></div>
+            </div></div>
+            <div class="srow"><span class="st"><b>화면 크기</b><small>영상과 채팅 사이의 선(폰은 손잡이)을 끌어서 바꿔요.</small></span><button type="button" class="btn" id="layoutReset">되돌리기</button></div>
+          </div>
+        </section>
+
+        <!-- 음성 -->
+        <section class="set-page" id="pgVoice" aria-labelledby="hVoice">
+          <h3 id="hVoice">음성</h3>
+          <h4 class="gt">내 목소리</h4>
+          <div class="sgroup">
+            <label class="srow rng"><span class="st"><b>마이크 입력 크기</b></span><output id="micGainOut" for="micGain">100%</output><input type="range" id="micGain" min="0" max="200" step="5" value="100"></label>
+            <label class="srow"><span class="st"><b>내 목소리 들어 보기</b><small>이어폰을 꼭 끼세요.</small></span><input type="checkbox" class="swt" id="monOn"></label>
+          </div>
+          <h4 class="gt">소리 다듬기</h4>
+          <div class="sgroup">
+            <label class="srow"><span class="st"><b>AI 잡음 억제</b><small>키보드·선풍기·주변 소리를 줄여요.</small></span><input type="checkbox" class="swt" id="nsOn"></label>
+            <label class="srow rng"><span class="st"><b>억제 강도</b></span><output id="nsAmtOut" for="nsAmt">100%</output><input type="range" id="nsAmt" min="0" max="100" step="5" value="100"></label>
+            <label class="srow rng"><span class="st"><b>울림 줄이기</b><small>방에서 울리는 소리를 줄여요. 0%면 꺼져요.</small></span><output id="drAmtOut" for="drAmt">0%</output><input type="range" id="drAmt" min="0" max="100" step="5" value="0"></label>
+            <label class="srow"><span class="st"><b>에코 제거</b></span><input type="checkbox" class="swt" id="ecOn"></label>
+            <label class="srow"><span class="st"><b>자동 음량 조절</b></span><input type="checkbox" class="swt" id="agcOn"></label>
+          </div>
+          <p class="note" id="nsNote"></p>
+          <p class="note" id="drNote"></p>
+          <p class="note">입력 크기와 잡음 억제는 다른 사람에게 들리는 내 목소리에 적용돼요. 다른 사람의 목소리 크기는 참가자 탭에서 그 사람을 눌러 조절해요.</p>
+        </section>
+
+        <!-- 알림 -->
+        <section class="set-page" id="notifSec" aria-labelledby="hNotif">
+          <h3 id="hNotif">알림</h3>
+          <div class="sgroup">
+            <label class="srow"><span class="st"><b>이 기기에서 알림 받기</b><small>앱이 닫혀 있어도 쪽지가 오면 알려 줘요.</small></span><input type="checkbox" class="swt" id="pushOn"></label>
+            <label class="srow"><span class="st"><b>쪽지가 오면 알림</b></span><input type="checkbox" class="swt" id="dmOn"></label>
+            <label class="srow"><span class="st"><b>앱 안에서 소리</b><small>쪽지가 오면 짧은 소리를 내요.</small></span><input type="checkbox" class="swt" id="dingOn"></label>
+            <div class="srow"><span class="st"><b>알림 확인</b></span><button type="button" class="btn" id="pushTest">테스트 알림 보내기</button></div>
+          </div>
+          <p class="note" id="pushNote"></p>
+        </section>
+
+        <!-- 숨기기 -->
+        <section class="set-page" id="pgHide" aria-labelledby="hHide">
+          <h3 id="hHide">숨기기</h3>
+          <h4 class="gt">패닉</h4>
+          <p class="note">패닉 버튼(또는 <kbd>Esc</kbd> 두 번)을 누르면 소리와 마이크를 끄고 화면을 강의 영상으로 덮어요. 풀려면 화면을 10초 누르고 비밀번호를 넣어요.</p>
+          <div class="sgroup">
+            <label class="srow"><span class="st"><b>강의 미리 재생</b><small>끄면 패닉을 누를 때 불러와요. 켜 두면 데이터를 조금 써요.</small></span><input type="checkbox" class="swt" id="panicPre"></label>
+          </div>
+          <div class="setbox" id="pinBox">
+            <h4 class="gt">잠금 해제 PIN <small>게스트</small></h4>
+            <div class="sgroup">
+              <p class="note pad" id="pinNow"></p>
+              <div class="srow stack"><div class="row"><label class="field"><span>새 PIN (숫자 4자리)</span><input type="password" id="pinNew" inputmode="numeric" maxlength="4" autocomplete="off"></label><button type="button" class="btn" id="pinGo">PIN 저장</button></div></div>
+            </div>
+            <p class="note" id="pinMsg" role="status"></p>
+          </div>
+          <div class="setbox" id="pinAcct" hidden><h4 class="gt">잠금 해제</h4><p class="note">로그인한 사람은 계정 비밀번호로 풀어요. PIN은 게스트만 써요.</p></div>
+          <h4 class="gt">알림 위장</h4>
+          <p class="note">알림의 이름·내용·아이콘을 평범한 것으로 바꿔요. 보낸 사람과 쪽지 내용은 알림에 실리지 않아요.</p>
+          <div class="sgroup">
+            <label class="srow"><span class="st"><b>위장 방식</b></span><select id="spoofSel"></select></label>
+            <label class="srow"><span class="st"><b>탭 제목과 아이콘도 바꾸기</b></span><input type="checkbox" class="swt" id="tabSpoof"></label>
+            <div class="srow stack"><div class="spoof-prev" id="spoofPrev" aria-live="polite"></div></div>
+          </div>
+          <details class="sub adv">
+            <summary>고급: 강의 영상 바꾸기</summary>
+            <label class="field"><span>유튜브 링크 (비우면 기본 강의)</span><input type="text" id="panicVideoIn" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…"></label>
+            <div><button type="button" class="btn" id="panicVideoGo">영상 저장</button></div>
+            <p class="note" id="panicMsg" role="status"></p>
           </details>
-        </div>
-      </section>
-      <section aria-labelledby="hAdmin" id="adminSec" hidden>
-        <h3 id="hAdmin">계정 관리</h3>
-        <p class="note">관리자에게만 보여요. 임시 비밀번호는 만든 사람의 화면에만 한 번 보여요.</p>
-        <div><button type="button" class="btn" id="acctRefresh">목록 새로고침</button></div>
-        <ul class="acctlist" id="acctList"></ul>
-        <p class="note" id="acctMsg" role="status"></p>
-      </section>
-      <section aria-labelledby="hRoom">
-        <h3 id="hRoom">방</h3>
-        <button type="button" class="btn" id="copy"><svg class="i"><use href="#i-link"/></svg>방 링크 복사</button>
-        <p class="note" id="verNote"></p>
-      </section>
+        </section>
+
+        <!-- 계정 -->
+        <section class="set-page" id="pgAcct" aria-labelledby="hAcct">
+          <h3 id="hAcct">계정</h3>
+          <div class="setbox" id="acctGuest">
+            <p class="note" id="acctGuestNote"></p>
+            <button type="button" class="btn primary" id="acctLogin">로그인 · 가입</button>
+          </div>
+          <div class="setbox" id="acctIn" hidden>
+            <p class="note" id="acctInfo"></p>
+            <h4 class="gt">닉네임</h4>
+            <div class="sgroup">
+              <div class="srow stack"><div class="row"><label class="field"><span>닉네임 바꾸기 (7일에 한 번)</span><input type="text" id="renIn" maxlength="20" autocomplete="off"></label><button type="button" class="btn" id="renGo">바꾸기</button></div></div>
+            </div>
+            <p class="note" id="renMsg" role="status"></p>
+            <h4 class="gt">보안</h4>
+            <details class="sub"><summary>비밀번호 바꾸기</summary>
+              <label class="field"><span>지금 비밀번호</span><input type="password" id="pwOld" autocomplete="current-password"></label>
+              <label class="field"><span>새 비밀번호 (8자 이상)</span><input type="password" id="pwNew" maxlength="64" autocomplete="new-password"></label>
+              <label class="field"><span>새 비밀번호 한 번 더</span><input type="password" id="pwNew2" maxlength="64" autocomplete="new-password"></label>
+              <div><button type="button" class="btn" id="pwGo">비밀번호 바꾸기</button></div>
+              <p class="note" id="pwMsg" role="status"></p>
+            </details>
+            <div class="sgroup">
+              <div class="srow"><span class="st"><b>이 기기에서 로그아웃</b></span><button type="button" class="btn" id="logoutBtn">로그아웃</button></div>
+            </div>
+            <details class="sub danger-zone"><summary>위험 구역</summary>
+              <div class="srow"><span class="st"><b>모든 기기에서 로그아웃</b><small>다른 기기의 로그인도 모두 풀려요.</small></span><button type="button" class="btn danger" id="logoutAllBtn">모두 로그아웃</button></div>
+              <details class="sub"><summary>계정 삭제</summary>
+                <p class="note">삭제하면 되돌릴 수 없어요. 내 닉네임은 다른 사람이 쓸 수 있게 되고, 내가 보낸 쪽지는 상대 화면에 "탈퇴한 사용자"로 남아요.</p>
+                <label class="field"><span>비밀번호 확인</span><input type="password" id="delPw" autocomplete="current-password"></label>
+                <div><button type="button" class="btn danger" id="delGo">계정 삭제</button></div>
+                <p class="note" id="delMsg" role="status"></p>
+              </details>
+            </details>
+          </div>
+          <div class="setbox" id="adminSec" hidden>
+            <h4 class="gt">계정 관리 <small>관리자</small></h4>
+            <p class="note">임시 비밀번호는 만든 사람의 화면에만 한 번 보여요.</p>
+            <div><button type="button" class="btn" id="acctRefresh">목록 새로고침</button></div>
+            <ul class="acctlist" id="acctList"></ul>
+            <p class="note" id="acctMsg" role="status"></p>
+          </div>
+        </section>
+
+        <!-- 앱 설치·정보 -->
+        <section class="set-page" id="pgApp" aria-labelledby="hApp">
+          <h3 id="hApp">앱 설치·정보</h3>
+          <h4 class="gt">앱으로 설치</h4>
+          <p class="note" id="installNote"></p>
+          <button type="button" class="btn primary" id="installBtn" hidden>앱으로 설치</button>
+          <div class="guide" id="installGuide">
+            <p class="note">설치하면 주소창 없이 앱처럼 열리고, 앱이 닫혀 있어도 쪽지 알림을 받을 수 있어요. 메뉴 이름은 기기와 버전에 따라 조금 달라요.</p>
+            <details class="sub" id="gIos">
+              <summary>iPhone·iPad</summary>
+              <ol>
+                <li><b>Safari</b>로 이 주소를 열어요. 카카오톡·인스타그램 같은 앱 안에서 열린 화면이라면, 먼저 메뉴에서 "Safari로 열기"를 눌러요.</li>
+                <li><b>공유 버튼</b>을 눌러요. 네모 위로 화살표가 나온 모양이에요. iPhone은 화면 아래(안 보이면 ⋯ 메뉴 안), iPad는 오른쪽 위에 있어요.</li>
+                <li>메뉴를 위로 밀어 <b>"홈 화면에 추가"</b>를 눌러요. 안 보이면 목록 맨 아래의 "더 보기"를 눌러 찾아요.</li>
+                <li>이름은 그대로 두고 오른쪽 위의 <b>"추가"</b>를 눌러요. "웹 앱으로 열기" 스위치가 보이면 켜 둔 채로 두세요.</li>
+                <li>홈 화면에 생긴 <b>아이콘으로 앱을 열어요</b>. 주소창이 없으면 앱으로 열린 거예요.</li>
+                <li>앱 안에서 설정 → 알림 → <b>"이 기기에서 알림 받기"</b>를 켜고 "허용"을 눌러요.</li>
+              </ol>
+              <p class="note">알림은 iOS·iPadOS <b>16.4 이상</b>에서, <b>홈 화면 아이콘으로 연 앱</b>에서만 켤 수 있어요. Safari 탭에서는 켜지지 않아요. 홈 화면 앱은 Safari와 저장 공간이 따로라서, 처음 열면 닉네임과 프로필을 다시 정해야 할 수 있어요.</p>
+            </details>
+            <details class="sub" id="gAnd">
+              <summary>Android 폰·태블릿 (Chrome)</summary>
+              <ol>
+                <li><b>Chrome</b>으로 이 주소를 열어요. 카카오톡 같은 앱 안에서 열린 화면이라면, 메뉴(⋮)에서 "다른 브라우저로 열기"를 눌러 Chrome으로 열어요.</li>
+                <li>오른쪽 위의 <b>⋮ 메뉴</b>를 눌러요.</li>
+                <li><b>"앱 설치"</b>를 눌러요. 이 항목이 없고 "홈 화면에 추가"만 보이면, 그걸 누른 뒤 나오는 창에서 "설치"를 골라요. 이 설정 창의 "앱으로 설치" 버튼이 보이면 그 버튼을 눌러도 같아요.</li>
+                <li>확인 창에서 <b>"설치"</b>를 누르면 홈 화면과 앱 목록에 아이콘이 생겨요.</li>
+                <li>아이콘으로 앱을 열고 설정 → 알림 → <b>"이 기기에서 알림 받기"</b>를 켜고 "허용"을 눌러요.</li>
+              </ol>
+            </details>
+            <details class="sub" id="gSam">
+              <summary>삼성 인터넷</summary>
+              <ol>
+                <li><b>삼성 인터넷</b>으로 이 주소를 열어요.</li>
+                <li>주소창 오른쪽에 설치 아이콘이 보이면 눌러서 "설치"를 골라요. 안 보이면 아래쪽 <b>☰ 메뉴</b> → <b>"현재 페이지 추가"</b> → <b>"홈 화면"</b>을 눌러요.</li>
+                <li>"추가"를 누르면 홈 화면에 아이콘이 생겨요. 아이콘으로 앱을 열고 설정 → 알림에서 알림을 켜요.</li>
+              </ol>
+            </details>
+            <details class="sub" id="gFix">
+              <summary>알림이 오지 않을 때</summary>
+              <ul>
+                <li>설정의 "이 기기에서 알림 받기"가 켜져 있는지 보고, "테스트 알림 보내기"를 눌러 확인해요.</li>
+                <li><b>iPhone·iPad</b>: 설정 앱 → 알림 → "시루 그룹챗"에서 "알림 허용"이 켜져 있는지 확인해요. 집중 모드나 방해 금지가 켜져 있어도 알림이 숨겨져요.</li>
+                <li><b>Android</b>: 설정 → 앱 → "시루 그룹챗" → 알림이 허용돼 있는지 확인해요. 배터리 설정에서 이 앱을 "제한 없음"(삼성은 "절전 예외 앱")으로 두면 화면이 꺼져 있어도 더 잘 와요.</li>
+                <li>알림 위장을 켜 두었다면 알림의 이름과 내용이 다르게 보여요. "숨기기"에서 확인해요.</li>
+              </ul>
+            </details>
+          </div>
+          <h4 class="gt" id="helpHead">도움말</h4>
+          <div class="sgroup" id="helpRows">
+            <div class="srow"><span class="st"><b>그룹방 도움말</b><small>방 쓰는 법을 다시 봐요.</small></span><button type="button" class="btn" id="helpRoom">다시 보기</button></div>
+            <div class="srow"><span class="st"><b>쪽지 도움말</b><small>암호화와 안전번호 확인 방법을 다시 봐요.</small></span><button type="button" class="btn" id="helpDm">다시 보기</button></div>
+          </div>
+          <h4 class="gt">이 방</h4>
+          <div class="sgroup">
+            <div class="srow"><span class="st"><b>방 링크</b></span><button type="button" class="btn" id="copy"><svg class="i"><use href="#i-link"/></svg>복사</button></div>
+          </div>
+          <p class="note" id="verNote"></p>
+        </section>
+
+      </div>
     </div>
   </form>
 </dialog>
@@ -477,5 +629,6 @@
 <script src="/notify.js"></script>
 <script src="/panic.js"></script>
 <script src="/attach.js"></script>
+<script src="/tour.js"></script>
 </body>
 </html>

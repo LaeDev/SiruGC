@@ -59,7 +59,7 @@ const UA = {
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!SHOTS) return; const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
-      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}/?step=profile` }); await wait(1200);
       return p;
     }
     const noOverflow = `document.documentElement.scrollWidth <= innerWidth`;
@@ -127,14 +127,14 @@ const UA = {
     console.log('앱 설치 안내');
     for (const [name, ua, open, closed] of [['iPhone', UA.iphone, 'gIos', ['gAnd', 'gSam']], ['Android Chrome', UA.android, 'gAnd', ['gIos', 'gSam']], ['삼성 인터넷', UA.samsung, 'gSam', ['gIos', 'gAnd']]]) {
       const G = await page(390, 844, true, ua);
-      await G.tap('#joinSettings'); await wait(400);
+      await G.tap('#joinSettings'); await G.js("setPage('app')"); await wait(400);
       check(await G.js(`document.querySelector('#settings').open && document.querySelector('#${open}').open && ${JSON.stringify(closed)}.every((i) => !document.querySelector('#' + i).open)`), `${name}: 설정 창을 열면 내 기기의 설치 순서만 펼쳐져 있음`);
       await G.js(`document.querySelector('#${open}').scrollIntoView({ block: 'start' })`); await wait(200);
       check(await G.js(`(() => { const d = document.querySelector('#settings').getBoundingClientRect(); return [...document.querySelectorAll('#installGuide details, #installGuide li')].every((e) => { const b = e.getBoundingClientRect(); return b.right <= d.right + 1 && b.left >= d.left - 1; }) && document.querySelector('.dlg-b').scrollWidth <= document.querySelector('.dlg-b').clientWidth; })()`), `${name}: 안내 글이 설정 창 밖으로 넘치지 않음`);
       if (name === 'iPhone') {
         check(await G.js(`document.querySelector('#installNote').textContent.includes('공유') || document.querySelector('#installNote').textContent.includes('홈 화면')`), 'iPhone: 설치 요약에 홈 화면에 추가하는 방법이 나옴');
         await G.shot('7-guide-iphone');
-        await G.tap('#gAnd > summary');
+        await G.tap('.others > summary'); await G.tap('#gAnd > summary');
         check(await G.js(`document.querySelector('#gAnd').open`), '다른 기기의 순서도 눌러서 펼칠 수 있음 (실제로 토글됨)');
         await G.tap('#gAnd > summary');
         check(await G.js(`!document.querySelector('#gAnd').open`), '다시 누르면 접힘');

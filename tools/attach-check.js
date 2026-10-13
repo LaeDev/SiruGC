@@ -37,7 +37,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable'); await call('DOM.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       const setFiles = async (selector, files) => { const { result: { root } } = await call('DOM.getDocument'); const { result: { nodeId } } = await call('DOM.querySelector', { nodeId: root.nodeId, selector }); await call('DOM.setFileInputFiles', { files, nodeId }); };
       return { js, call, setFiles };

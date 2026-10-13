@@ -38,7 +38,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: size.mobile ? 2 : 1, mobile: !!size.mobile });
       if (size.mobile) await call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(900); };
+      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(900); };
       await open();
       return { js, call, open };
     }

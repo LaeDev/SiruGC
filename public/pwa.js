@@ -3,8 +3,30 @@ let installEvt = null; // 브라우저가 "설치할 수 있어요"라고 알려
 const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
 if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('서비스 워커를 등록하지 못했어요', e)));
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js?v=' + BUILD).catch((e) => console.warn('서비스 워커를 등록하지 못했어요', e)));
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.t === 'sw-updated' && e.data.build !== BUILD) offerUpdate(e.data.build); }); // 새 서비스 워커가 자리 잡았는데 이 화면이 옛 버전
 }
+// 최신 화면으로 새로고침: 서비스 워커와 저장된 앱 파일을 지우고 처음부터 다시 받는다 (로그인·설정은 그대로)
+async function forceRefresh() {
+  try { for (const r of (await navigator.serviceWorker?.getRegistrations?.()) || []) await r.unregister(); } catch {}
+  try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
+  location.replace(location.pathname + '?r=' + Date.now());
+}
+// 열어 둔 화면(특히 앱으로 설치해 메모리에 계속 떠 있는 것)이 옛 버전인지, 화면을 다시 볼 때마다 서버에 물어본다
+let buildAsked = 0;
+async function checkBuild() {
+  if (!BUILD || Date.now() - buildAsked < 30000) return;
+  buildAsked = Date.now();
+  try {
+    navigator.serviceWorker?.getRegistration?.().then((r) => r?.update?.()).catch(() => {});
+    const j = await (await fetch('/build', { cache: 'no-store' })).json();
+    if (j.build && j.build !== BUILD) offerUpdate(j.build);
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkBuild(); });
+addEventListener('pageshow', checkBuild);
+setInterval(checkBuild, 5 * 60 * 1000);
+$('#forceRefresh').onclick = forceRefresh;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; renderInstall(); });
 addEventListener('appinstalled', () => { installEvt = null; renderInstall(); });
 matchMedia('(display-mode: standalone)').addEventListener('change', renderInstall);
@@ -22,7 +44,12 @@ function renderInstall() {
 // 쓰고 있는 기기의 설치 방법만 처음부터 펼쳐 둔다 (이미 앱으로 실행 중이면 모두 접어 둔다)
 {
   const ua = navigator.userAgent, mine = isIos() ? 'gIos' : /SamsungBrowser/i.test(ua) ? 'gSam' : /Android/i.test(ua) ? 'gAnd' : '';
-  if (mine && !isStandalone()) $('#' + mine).open = true;
+  if (mine && !isStandalone()) {
+    $('#' + mine).open = true;
+    const others = el('details', { className: 'others sub' }, el('summary', { textContent: '다른 기기 설치 방법' }));
+    for (const id of ['gIos', 'gAnd', 'gSam']) if (id !== mine) others.append($('#' + id));
+    $('#' + mine).after(others);
+  }
 }
 $('#installBtn').onclick = async () => {
   if (!installEvt) return;

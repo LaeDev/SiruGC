@@ -1,8 +1,9 @@
 /* 서비스 워커: 앱 껍데기를 저장해 두고(설치 가능 조건), 서버가 꺼졌을 때도 '서버가 꺼졌습니다' 안내 페이지가 뜨게 한다.
    파일을 추가하면 SHELL 목록과 CACHE 이름(버전)을 같이 올린다. 정적 파일은 '네트워크 우선'이라 서버를 고치면 바로 반영된다. */
-const CACHE = 'siru-shell-v9';
+const BUILD = '__BUILD__'; // 서버가 sw.js 를 내려 줄 때 화면 버전으로 바꿔 준다
+const CACHE = 'siru-shell-' + BUILD;
 const SHELL = [
-  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/e2ee.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/layout.js',
+  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/e2ee.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/tour.js', '/layout.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 
@@ -15,7 +16,9 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
     .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
-    .then(() => self.clients.claim()));
+    .then(() => self.clients.claim())
+    .then(() => self.clients.matchAll({ type: 'window' }))
+    .then((list) => list.forEach((c) => c.postMessage({ t: 'sw-updated', build: BUILD })))); // 열어 둔 화면이 옛 버전이면 "새 버전" 띠를 띄우게
 });
 
 // 화면(내비게이션) 요청: 서버가 응답 못 하거나 5xx(프록시의 502 등)면 저장해 둔 앱 껍데기를 보여 준다.

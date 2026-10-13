@@ -36,7 +36,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: size.mobile ? 2 : 1, mobile: !!size.mobile });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); window.confirm = () => true; })()`); await wait(1000);
       return { js, call, name, targetId };
     }

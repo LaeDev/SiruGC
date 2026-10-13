@@ -114,7 +114,61 @@ function renderThreadHeader() {
   const closed = blocked || !!p?.deleted;
   $('#dmIn').disabled = $('#dmAttachBtn').disabled = $('#dmForm button[type=submit]').disabled = closed;
   $('#dmIn').placeholder = blocked ? '차단한 사람에게는 보낼 수 없어요' : p?.deleted ? '탈퇴한 사용자에게는 보낼 수 없어요' : '쪽지를 입력하세요';
+  encBadge();
 }
+
+/* ---------- 암호화 확인: 안전번호, 서버가 보관하는 모습, 상대의 키가 바뀌었을 때 알림 ----------
+   안전번호 = 두 사람의 공개 키에서 만든 숫자 24자리 (양쪽 화면에서 같아야 한다). 같으면 중간에서 키를 바꿔치기한 사람이 없다는 뜻이다.
+   (tools/_e2e.js 의 safetyNumber 와 같은 방식이다. 바꾸면 같이 바꾼다) */
+const encDlg = $('#encDlg');
+const peerKey = (uid) => e2eeCur.get(uid); // { kid, pub }
+const safeKey = (uid) => 'safe:' + uid;
+const isVerified = (uid) => { const k = peerKey(uid); return !!k && !!e2eeKey && get(safeKey(uid)) === k.kid + '|' + e2eeKey.kid; };
+function encBadge() {
+  const b = $('#dmEnc'), uid = dmOpenUid, k = uid && peerKey(uid), ver = !!k && isVerified(uid);
+  $('#dmEncTxt').textContent = !k ? '상대 준비 전' : ver ? '확인됨' : '암호화됨';
+  b.classList.toggle('ok', ver);
+  b.title = !k ? '상대가 아직 쪽지 보안 키를 만들지 않았어요' : ver ? '안전번호를 확인한 대화예요' : '눌러서 암호화되는지 확인해요';
+}
+async function safetyNumber(peerUid, peerPub) {
+  const mine = e2eeCur.get(meUid)?.pub; if (!mine || !peerPub) return null;
+  const [a, b] = [[meUid, mine], [peerUid, peerPub]].sort((x, y) => (x[0] < y[0] ? -1 : 1));
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', e2eeText.encode(['siru-safety-v1', a[0], a[1], b[0], b[1]].join('|'))));
+  return [0, 1, 2, 3, 4, 5].map((i) => String((((h[i * 4] << 24) | (h[i * 4 + 1] << 16) | (h[i * 4 + 2] << 8) | h[i * 4 + 3]) >>> 0) % 10000).padStart(4, '0'));
+}
+function dmKeyCheck(uid) { // 상대의 키가 지난번에 본 것과 다르면 알린다 (처음 보는 키는 그냥 기억해 둔다)
+  const k = peerKey(uid); if (!k) return;
+  const prev = get('peerKid:' + uid);
+  if (!prev) set('peerKid:' + uid, k.kid);
+  $('#dmKeyWarn').hidden = !(prev && prev !== k.kid && dmOpenUid === uid);
+}
+async function encOpen() {
+  const uid = dmOpenUid; if (!uid || dmLocked()) return;
+  if (!e2eeCur.has(meUid)) await e2eeKeysOf(meUid);
+  if (!peerKey(uid)) await e2eeKeysOf(uid);
+  const k = peerKey(uid), p = dmPeers.get(uid), name = p?.name || '상대';
+  $('#encLead').textContent = k ? `${name} 님과 주고받는 쪽지는 두 사람의 기기에서만 풀 수 있게 암호화돼요.` : `${name} 님이 아직 쪽지 보안 키를 만들지 않았어요. 상대가 한 번 로그인하면 암호화해서 보낼 수 있어요.`;
+  const nums = k ? await safetyNumber(uid, k.pub) : null;
+  $('#encNum').replaceChildren(...(nums || ['—']).map((n) => el('span', { textContent: n })));
+  $('#encState').textContent = !nums ? '' : isVerified(uid) ? '이 번호를 확인했어요.' : '아직 확인하지 않았어요.';
+  $('#encOk').hidden = $('#encDiff').hidden = !nums;
+  const last = (dmThreads.get(uid) || []).filter((x) => x.enc).at(-1);
+  $('.enc-cmp').hidden = !last;
+  $('#encHow').textContent = last ? '가장 최근 쪽지가 서버에 저장된 모습이에요. 알아볼 수 없는 문자열이라 서버는 읽을 수 없고, 내 기기에서만 아래처럼 풀려요.' : '아직 주고받은 쪽지가 없어요. 쪽지를 하나 보내면 서버에 저장된 모습을 볼 수 있어요.';
+  if (last) {
+    $('#encCt').textContent = last.enc.ct.slice(0, 160) + (last.enc.ct.length > 160 ? '…' : '');
+    $('#encPt').textContent = last.pt ? last.pt.t || (last.pt.m ? '(사진·동영상)' : '') : '이 기기에서는 풀 수 없는 쪽지예요.';
+  }
+  if (typeof encDlg.showModal === 'function') { if (!encDlg.open) encDlg.showModal(); } else { encDlg.setAttribute('open', ''); encDlg.classList.add('fallback'); }
+}
+const encClose = () => { if (typeof encDlg.close === 'function') encDlg.close(); else encDlg.removeAttribute('open'); };
+$('#dmEnc').onclick = encOpen;
+$('#dmKeyWarnGo').onclick = encOpen;
+$('#dmKeyAccept').onclick = () => { const k = peerKey(dmOpenUid); if (k) set('peerKid:' + dmOpenUid, k.kid); $('#dmKeyWarn').hidden = true; };
+$('#encClose').onclick = (e) => { e.preventDefault(); encClose(); };
+encDlg.addEventListener('click', (e) => { if (e.target === encDlg) encClose(); });
+$('#encOk').onclick = () => { const k = peerKey(dmOpenUid); if (!k || !e2eeKey) return; set(safeKey(dmOpenUid), k.kid + '|' + e2eeKey.kid); $('#encState').textContent = '이 번호를 확인했어요.'; encBadge(); $('#dmKeyWarn').hidden = true; set('peerKid:' + dmOpenUid, k.kid); };
+$('#encDiff').onclick = () => { set(safeKey(dmOpenUid), ''); $('#encState').textContent = '번호가 다르면 이 대화를 믿지 마세요. 그 사람에게 통화나 직접 만나는 다른 방법으로 연락해서 확인해 주세요.'; encBadge(); };
 
 /* ---------- 대화창 ---------- */
 function dmBubble(msg) {
@@ -158,7 +212,7 @@ function dmReceipt() { // 내가 보낸 마지막 쪽지가 읽혔는지
 function openDm(uid, info) {
   if (!uid || uid === meUid) return;
   if (!dmPeers.has(uid)) dmPeers.set(uid, { uid, name: info?.name || '알 수 없음', color: info?.color || null, unread: 0 });
-  dmOpenUid = uid;
+  dmOpenUid = uid; $('#dmKeyWarn').hidden = true;
   showTab('dm'); dmView('thread');
   $('#dmMsgs').replaceChildren();
   send({ t: 'dm-history', with: uid });
@@ -261,7 +315,7 @@ Object.assign(handlers, {
     dmRender();
   }),
   'dm-thread': dmSerial(async (m) => {
-    e2eeNote(m.with, m.peer?.kid, m.peer?.pub);
+    e2eeNote(m.with, m.peer?.kid, m.peer?.pub); dmKeyCheck(m.with);
     await dmReveal(m.msgs);
     dmThreads.set(m.with, m.msgs);
     const p = dmPeers.get(m.with);

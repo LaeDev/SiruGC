@@ -41,7 +41,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200); await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000); };
+      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200); await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000); };
       const key = async (k, code, vk) => { for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk }); };
       await open();
       return { ctx: browserContextId, js, call, key, open, shot: async (f) => fs.writeFileSync(f, Buffer.from((await call('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')) };
