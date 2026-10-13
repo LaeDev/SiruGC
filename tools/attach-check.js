@@ -119,6 +119,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     const m = await B.js(`(() => ({ hs: document.documentElement.scrollWidth - innerWidth, c: document.querySelector('#chat').scrollWidth - document.querySelector('#chat').clientWidth, mw: Math.max(...[...document.querySelectorAll('#chat .media')].map((x) => x.getBoundingClientRect().width)), vw: innerWidth }))()`);
     check(m.hs <= 0 && m.c <= 0 && m.mw > 50 && m.mw <= m.vw, `사진·동영상이 화면을 넘지 않음 (가장 넓은 미디어 ${Math.round(m.mw)}px / 화면 ${m.vw}px)`);
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); fs.rmSync(upDir, { recursive: true, force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); fs.rmSync(upDir, { recursive: true, force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

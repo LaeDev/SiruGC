@@ -83,6 +83,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(down, `서버가 꺼지면 "서버가 꺼졌습니다" 안내가 뜸 (${took.toFixed(1)}초)`);
     check(took >= 11, '단, 잠깐 끊긴 것(12초 미만)에는 뜨지 않음');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

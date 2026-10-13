@@ -79,6 +79,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     await A.js(`document.querySelector('#voiceBtn').click()`);
     check(await until(B, `vpcs.size === 0 && document.querySelectorAll('#users .vi').length === 1`, '음성 나가기'), 'A가 음성에서 나가면 연결 정리됨');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

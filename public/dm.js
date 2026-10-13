@@ -8,7 +8,8 @@ let dmOpenUid = null;        // 지금 열어 둔 대화 상대
 let dmBlocked = new Set();   // 내가 차단한 사람들
 let dmMembers = [];          // 새 쪽지 상대 고르기용 전체 회원
 
-const dmOnline = (uid) => users.some((u) => u.uid === uid);
+// 쪽지만 쓰는 사람은 방 참가자 목록을 받지 않아서, 대화를 열 때 서버가 알려 준 접속 여부를 쓴다
+const dmOnline = (uid) => users.some((u) => u.uid === uid) || (dmOnly && !!dmPeers.get(uid)?.online);
 const dmUnread = () => [...dmPeers.values()].reduce((n, p) => n + (p.unread || 0), 0);
 const peerUser = (p) => ({ name: p.name, color: p.color, avatar: `/a/${p.uid}` }); // 접속 중이 아닌 사람의 프사도 서버에서 받는다
 const dmTime = (ts) => {
@@ -212,7 +213,7 @@ Object.assign(handlers, {
     dmThreads.set(m.with, m.msgs);
     const p = dmPeers.get(m.with);
     if (p) {
-      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color });
+      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color, online: m.peer.online });
       const last = m.msgs.at(-1);
       if (last) p.last = { text: lastText(last), ts: last.ts, mine: last.from === meUid }; else delete p.last; // 지운 뒤에는 목록 미리보기도 맞춘다
     }

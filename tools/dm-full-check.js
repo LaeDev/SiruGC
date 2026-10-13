@@ -133,6 +133,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await M.js(`document.documentElement.scrollWidth - innerWidth <= 0`), '폰에서 가로로 넘치지 않음');
     check(await M.js(`(() => { const r = document.querySelector('#dmIn').getBoundingClientRect(); return r.bottom <= innerHeight && r.top > 0; })()`), '폰에서 쪽지 입력창이 화면 안에 보임');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

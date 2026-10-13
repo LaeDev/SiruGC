@@ -93,7 +93,7 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
   }
   // force: 테스트 알림처럼 화면을 보고 있어도 보낼 때
   function pushTo(uid, fromName, text, fromUid, { force = false } = {}) {
-    if (!force && clientsOf(uid).some((c) => c.visible)) return; // 화면을 보고 있으면 앱 안 알림으로 충분하다
+    if (!force && clientsOf(uid).some((c) => c.visible && !c.ghost && Date.now() - (c.lastMsgAt || 0) < 45000)) return; // 화면을 켜 놓은 척 멈춰 있는(꺼진 폰) 연결은 보고 있는 것으로 치지 않는다 // 화면을 보고 있으면 앱 안 알림으로 충분하다
     for (const s of room.subs[uid] || []) if (s.prefs.dm) pushOne(uid, s, payloadFor(s.prefs.spoof, fromName, text, fromUid));
   }
 

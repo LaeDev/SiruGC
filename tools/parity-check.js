@@ -110,7 +110,7 @@ function snapshot() {
       await raw('Target.closeTarget', { targetId }); await wait(700); // 이전 프로필의 접속이 정리될 시간
     }
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
 
   // ================= 비교 =================
   const D = results[DESKTOP.key];

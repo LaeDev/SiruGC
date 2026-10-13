@@ -178,6 +178,6 @@ fs.mkdirSync(OUT, { recursive: true });
 
     console.log('페이지 예외:', errors.length ? errors : '없음'); if (errors.length) failed++;
     guest.close(); cdp.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
