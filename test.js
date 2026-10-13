@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const http = require('http');
 const { spawn } = require('child_process');
 const WebSocket = require('ws');
+const { newKeys, wrapPriv, unwrapPriv, encryptDm, decryptDm, encryptFile, decryptFile } = require('./tools/_e2e');
 
 const PORT = 3100 + Math.floor(Math.random() * 500);
 const STATE = path.join(os.tmpdir(), `chat-test-${Date.now()}.json`);
@@ -33,7 +34,10 @@ async function account(name, { port = PORT } = {}) {
   if (!ACCOUNTS.has(k)) {
     const r = await api('/auth/signup', { name, password: 'pw-' + name + '-12345', code: 'test-code' }, { port });
     assert(r.ok, '가입 실패: ' + name + ' ' + JSON.stringify(r));
-    ACCOUNTS.set(k, r);
+    const keys = await newKeys('pw-' + name + '-12345'); // 쪽지 보안 키 (기기에서 만들고 공개 키와 감싼 비밀 키만 서버에 맡긴다)
+    const kr = await api('/auth/keys', { token: r.token, pub: keys.pub, wrapped: keys.wrapped }, { port });
+    assert(kr.ok && kr.kid === keys.kid, '쪽지 키 등록 실패: ' + name);
+    ACCOUNTS.set(k, { ...r, keys });
   }
   return ACCOUNTS.get(k);
 }
@@ -41,16 +45,32 @@ async function account(name, { port = PORT } = {}) {
 function client(cid, name, extra = {}, { host = 'localhost', headers, port = PORT } = {}) {
   const c = { ws: null, msgs: [], closed: false };
   c.open = (async () => {
-    const { acct, ...rest } = extra;
+    const { acct, keys, ...rest } = extra;
     const join = { t: 'join', name, cid, ...rest };
-    if (acct) join.token = (await account(name, { port })).token;
+    if (acct) { const a = await account(name, { port }); join.token = a.token; c.keys = a.keys; }
+    if (keys) c.keys = keys;
     c.ws = new WebSocket(`ws://${host}:${port}`, { headers });
-    c.ws.on('message', (d) => c.msgs.push(JSON.parse(d)));
+    c.ws.on('message', (d) => { const m = JSON.parse(d); if (m.t === 'joined') c.uid = m.me.uid; c.msgs.push(m); });
     c.ws.on('close', () => (c.closed = true));
     await new Promise((r) => c.ws.on('open', r));
     c.ws.send(JSON.stringify(join));
   })();
   c.send = (m) => c.ws.send(JSON.stringify(m));
+  // ---- 쪽지 암호화 (화면이 하는 일을 흉내 낸다) ----
+  c.myUid = () => c.uid;
+  const me = () => ({ priv: c.keys.priv, kid: c.keys.kid, uid: c.myUid() });
+  c.keyOf = async (uid, kid) => { // 상대의 공개 키(들)를 서버에서 받는다 (kid를 정하면 그 키)
+    const from = c.msgs.length; c.send({ t: 'dm-keys', uid });
+    const r = await until(() => c.msgs.slice(from).find((m) => m.t === 'dm-keys' && m.uid === uid), '공개 키 목록');
+    return kid ? r.keys.find((k) => k.kid === kid) : r.keys.at(-1);
+  };
+  c.dm = async (to, text, media, peerOverride) => {
+    const peer = peerOverride || (await c.keyOf(to)) || { kid: '0000000000000000', pub: c.keys.pub }; // 모르는 사람이면 아무 키나 (서버가 걸러야 한다)
+    c.send({ t: 'dm', to, enc: await encryptDm(me(), { uid: to, ...peer }, { t: String(text).trim().slice(0, 500), m: media }) });
+  };
+  c.reveal = async (msg) => decryptDm(me(), msg, async (uid, kid) => (await c.keyOf(uid, kid)).pub);
+  c.preview = (e) => c.reveal({ from: e.last.mine ? c.myUid() : e.uid, to: e.last.mine ? e.uid : c.myUid(), enc: e.last.enc }); // 쪽지 목록의 마지막 쪽지
+  c.texts = (msgs) => Promise.all(msgs.map(async (m) => (await c.reveal(m)).t));
   c.find = (t) => c.msgs.find((m) => m.t === t);
   c.last = (t) => [...c.msgs].reverse().find((m) => m.t === t);
   c.clear = () => (c.msgs.length = 0);
@@ -178,38 +198,42 @@ async function main() {
   assert.equal((await fetch(`http://localhost:${PORT}/a/ffffffffffff`)).status, 404, '모르는 uid는 404');
 
   host.clear();
-  a.send({ t: 'dm', to: hostUid, text: '  안녕, 쪽지야  ' });
+  await a.dm(hostUid, '  안녕, 쪽지야  ');
   const dm1 = await until(() => host.find('dm'), '쪽지 도착');
-  assert.equal(dm1.msg.text, '안녕, 쪽지야', '앞뒤 공백은 잘림'); assert.equal(dm1.msg.from, aliceUid); assert.equal(dm1.peer.name, '앨리스');
+  assert.equal((await host.reveal(dm1.msg)).t, '안녕, 쪽지야', '받는 사람 기기에서 풀리고, 앞뒤 공백은 보내는 화면이 잘라 줌'); assert.equal(dm1.msg.from, aliceUid); assert.equal(dm1.peer.name, '앨리스');
+  assert(!JSON.stringify(dm1).includes('안녕') && !JSON.stringify(dm1).includes('쪽지야'), '서버가 보낸 쪽지에는 내용이 평문으로 들어 있지 않음');
   assert(a.find('dm'), '보낸 사람 화면에도 같은 쪽지가 옴(여러 기기 동기화)');
-  a.clear(); a.send({ t: 'dm', to: aliceUid, text: '나에게' }); a.send({ t: 'dm', to: 'ffffffffffff', text: '모르는 사람' }); a.send({ t: 'dm', to: hostUid, text: '   ' }); await wait(500);
-  assert(!a.find('dm'), '자기 자신, 모르는 사람, 빈 글은 무시');
-  a.send({ t: 'dm', to: hostUid, text: 'x'.repeat(700) }); a.send({ t: 'dm', to: hostUid, text: '너무 빨라' }); await wait(500);
+  a.clear(); await a.dm(aliceUid, '나에게'); await a.dm('ffffffffffff', '모르는 사람'); await a.dm(hostUid, '   '); await wait(500);
+  assert(!a.find('dm'), '자기 자신, 모르는 사람은 무시');
+  a.send({ t: 'dm', to: hostUid, text: '평문 쪽지' }); a.send({ t: 'dm', to: hostUid, enc: { s: 'x', r: 'y', iv: 'AAAAAAAAAAAAAAAA', ct: 'A'.repeat(20000) } }); await wait(500);
+  assert.equal(a.msgs.filter((m) => m.t === 'dm-error').length, 2, '암호화하지 않았거나 너무 큰 쪽지는 서버가 받지 않음'); assert(!host.msgs.some((m) => m.t === 'dm' && m.msg.id !== dm1.msg.id), '그런 쪽지는 상대에게 가지 않음');
+  await a.dm(hostUid, 'x'.repeat(700)); await a.dm(hostUid, '너무 빨라'); await wait(500);
   assert.equal(host.msgs.filter((m) => m.t === 'dm').length, 2, '0.4초 안의 연속 쪽지는 도배로 막힘');
-  assert.equal(host.last('dm').msg.text.length, 500, '500자까지만');
   host.send({ t: 'dm-history', with: aliceUid });
   assert.equal((await until(() => host.find('dm-thread'), '기록')).msgs.length, 2, '대화 기록을 불러옴');
 
   // 오프라인인 사람에게도 전달 + 안 읽음 표시 + 읽음 처리
   const z = client('zed-cid-0000001', '제드', { acct: true }); await z.open; await wait();
   const zUid = z.find('joined').me.uid; z.ws.close(); await wait(300);
-  a.send({ t: 'dm', to: zUid, text: '자고 있니?' }); await wait(500);
+  await a.dm(zUid, '자고 있니?'); await wait(500);
   const z2 = client('zed-cid-0000001', '제드', { acct: true }); await z2.open; await wait();
   const inbox = z2.find('joined').inbox;
-  assert(inbox.length === 1 && inbox[0].uid === aliceUid && inbox[0].unread === 1 && inbox[0].last.text === '자고 있니?' && inbox[0].online, '오프라인 쪽지가 안 읽음 1로 도착');
+  assert(!JSON.stringify(fs.readFileSync(STATE, 'utf8')).includes('자고 있니'), '저장 파일에도 쪽지 내용이 평문으로 없음');
+  assert(inbox.length === 1 && inbox[0].uid === aliceUid && inbox[0].unread === 1 && (await z2.preview(inbox[0])).t === '자고 있니?' && inbox[0].online, '오프라인 쪽지가 안 읽음 1로 도착 (미리보기는 받는 기기가 풂)');
   z2.send({ t: 'dm-read', with: aliceUid }); await wait(300); z2.ws.close(); await wait(200);
   const z3 = client('zed-cid-0000001', '제드', { acct: true }); await z3.open; await wait();
   assert.equal(z3.find('joined').inbox[0].unread, 0, '읽음 처리가 저장됨');
 
   // ---- 푸시 알림: 화면을 안 볼 때만, 위장 설정대로 ----
   const sub = (n) => ({ endpoint: 'https://push.example.test/' + n, keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) } });
-  const dmTo = async (text) => { sink.hits.length = 0; a.send({ t: 'dm', to: zUid, text }); await wait(500); return sink.hits; };
+  const dmTo = async (text) => { sink.hits.length = 0; await a.dm(zUid, text); await wait(500); return sink.hits; };
   z3.send({ t: 'push-sub', sub: sub(1), prefs: { dm: true, spoof: 'off' } }); await until(() => z3.find('push-ok'), '구독 등록');
   z3.send({ t: 'vis', v: true }); await wait(100);
   assert.equal((await dmTo('보고 있을 때')).length, 0, '화면을 보고 있으면 푸시를 보내지 않음');
   z3.send({ t: 'vis', v: false }); await wait(100);
   let hit = (await dmTo('안 볼 때'))[0];
-  assert(hit && hit.payload.title === '앨리스' && hit.payload.body === '안 볼 때' && hit.payload.uid === aliceUid, '화면을 안 보면 보낸 사람과 내용이 보임');
+  assert(hit && hit.payload.title === '앨리스' && hit.payload.body === '새 쪽지가 왔어요' && hit.payload.uid === aliceUid, '화면을 안 보면 보낸 사람이 보임 (내용은 서버도 모르니 "새 쪽지가 왔어요")');
+  assert(!JSON.stringify(hit).includes('안 볼 때'), '알림에는 쪽지 내용이 없음');
   z3.send({ t: 'push-sub', sub: sub(1), prefs: { dm: true, spoof: 'study' } }); await wait(200);
   hit = (await dmTo('비밀 내용입니다'))[0];
   assert(hit.payload.title === '학습 도우미' && hit.payload.body === '새 알림 1개' && hit.payload.icon === '/icons/spoof-study.png', '위장하면 가짜 이름·내용·아이콘');
@@ -288,7 +312,7 @@ async function dmFullCheck() {
   assert(mem.findIndex((u) => u.uid === x2.uid) < mem.findIndex((u) => u.uid === x3.uid), '접속 중인 사람이 먼저');
 
   // 읽음 표시
-  x1.send({ t: 'dm', to: x2.uid, text: '읽음 확인' }); const sent = (await until(() => x2.find('dm'), '쪽지 도착')).msg;
+  await x1.dm(x2.uid, '읽음 확인'); const sent = (await until(() => x2.find('dm'), '쪽지 도착')).msg;
   x1.send({ t: 'dm-history', with: x2.uid }); assert.equal((await until(() => x1.find('dm-thread'), '기록')).msgs.at(-1).read, false, '읽기 전에는 read=false');
   x1.clear(); x2.send({ t: 'dm-read', with: x1.uid });
   assert.equal((await until(() => x1.find('dm-seen'), '읽음 알림')).by, x2.uid, '상대가 읽으면 보낸 사람에게 dm-seen이 감');
@@ -305,14 +329,14 @@ async function dmFullCheck() {
   x2.send({ t: 'dm-history', with: x1.uid }); assert.equal((await until(() => x2.find('dm-thread'), '기록')).msgs.length, 0, '기록에서 빠짐');
 
   // 대화 정리: 내 화면에서만
-  x1.send({ t: 'dm', to: x2.uid, text: '정리 전 1' }); await wait(500); x1.send({ t: 'dm', to: x2.uid, text: '정리 전 2' }); await wait(500);
+  await x1.dm(x2.uid, '정리 전 1'); await wait(500); await x1.dm(x2.uid, '정리 전 2'); await wait(500);
   x2.clear(); x2.send({ t: 'dm-clear', with: x1.uid }); await until(() => x2.find('dm-cleared'), '정리 알림');
   x2.send({ t: 'dm-history', with: x1.uid }); assert.equal((await until(() => x2.find('dm-thread'), '기록')).msgs.length, 0, '정리한 쪽에서는 이전 쪽지가 안 보임');
   x1.clear(); x1.send({ t: 'dm-history', with: x2.uid }); assert((await until(() => x1.find('dm-thread'), '기록')).msgs.length >= 2, '상대 화면의 기록은 그대로');
-  x1.send({ t: 'dm', to: x2.uid, text: '정리 후' }); await wait(500);
-  x2.clear(); x2.send({ t: 'dm-history', with: x1.uid }); assert.deepEqual((await until(() => x2.find('dm-thread'), '기록')).msgs.map((m) => m.text), ['정리 후'], '정리한 뒤 온 쪽지만 보임');
+  await x1.dm(x2.uid, '정리 후'); await wait(500);
+  x2.clear(); x2.send({ t: 'dm-history', with: x1.uid }); assert.deepEqual(await x2.texts((await until(() => x2.find('dm-thread'), '기록')).msgs), ['정리 후'], '정리한 뒤 온 쪽지만 보임');
   const x2b = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2b.open; await wait(300);
-  assert.equal(x2b.find('joined').inbox.find((c) => c.uid === x1.uid).last.text, '정리 후', '다시 접속해도 정리가 유지되고 목록 미리보기는 새 쪽지');
+  assert.equal((await x2b.preview(x2b.find('joined').inbox.find((c) => c.uid === x1.uid))).t, '정리 후', '다시 접속해도 정리가 유지되고 목록 미리보기는 새 쪽지');
   x2b.ws.close();
 
   // 차단
@@ -321,22 +345,93 @@ async function dmFullCheck() {
   x2.send({ t: 'vis', v: false }); x2.clear(); x2.send({ t: 'dm-block', uid: x1.uid, on: true });
   assert.deepEqual((await until(() => x2.find('blocks'), '차단 목록')).list, [x1.uid], '차단하면 목록이 돌아옴');
   x2.clear(); x1.clear(); sink.hits.length = 0; await wait(450);
-  x1.send({ t: 'dm', to: x2.uid, text: '차단된 상태의 쪽지' }); await until(() => x1.find('dm'), '보낸 사람 화면에는 정상으로 보임');
+  await x1.dm(x2.uid, '차단된 상태의 쪽지'); await until(() => x1.find('dm'), '보낸 사람 화면에는 정상으로 보임');
   await wait(600);
   assert(!x2.find('dm'), '차단한 사람에게는 쪽지가 도착하지 않음');
   assert.equal(sink.hits.length, 0, '알림(푸시)도 가지 않음');
-  x2.send({ t: 'dm-history', with: x1.uid }); assert(!(await until(() => x2.find('dm-thread'), '기록')).msgs.some((m) => m.text === '차단된 상태의 쪽지'), '차단한 쪽 기록에는 안 남음');
-  x1.send({ t: 'dm-history', with: x2.uid }); assert((await until(() => x1.find('dm-thread'), '기록')).msgs.some((m) => m.text === '차단된 상태의 쪽지'), '차단당한 쪽 기록에는 남아 있음(차단 사실을 숨김)');
+  x2.send({ t: 'dm-history', with: x1.uid }); assert(!(await x2.texts((await until(() => x2.find('dm-thread'), '기록')).msgs)).includes('차단된 상태의 쪽지'), '차단한 쪽 기록에는 안 남음');
+  x1.send({ t: 'dm-history', with: x2.uid }); assert((await x1.texts((await until(() => x1.find('dm-thread'), '기록')).msgs)).includes('차단된 상태의 쪽지'), '차단당한 쪽 기록에는 남아 있음(차단 사실을 숨김)');
   x2.send({ t: 'dm-read', with: x1.uid }); x1.clear(); await wait(300); assert(!x1.find('dm-seen'), '전달되지 않은 쪽지는 읽음으로 바뀌지 않음');
-  x2.clear(); x2.send({ t: 'dm', to: x1.uid, text: '내가 차단한 사람에게' }); assert((await until(() => x2.find('dm-error'), '오류')).msg.includes('차단'), '내가 차단한 사람에게는 보낼 수 없고 이유를 알려 줌');
+  x2.clear(); await x2.dm(x1.uid, '내가 차단한 사람에게'); assert((await until(() => x2.find('dm-error'), '오류')).msg.includes('차단'), '내가 차단한 사람에게는 보낼 수 없고 이유를 알려 줌');
   x2.send({ t: 'dm-block', uid: x1.uid, on: false }); await until(() => x2.last('blocks')?.list.length === 0, '차단 해제'); x1.clear(); x2.clear(); await wait(450);
-  x1.send({ t: 'dm', to: x2.uid, text: '해제 뒤' }); await until(() => x2.find('dm'), '차단을 풀면 다시 도착함');
+  await x1.dm(x2.uid, '해제 뒤'); await until(() => x2.find('dm'), '차단을 풀면 다시 도착함');
   const x2c = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2c.open; await wait(300);
   assert.deepEqual(x2c.find('joined').blocks, [], '입장할 때 차단 목록을 받음');
   x2.send({ t: 'dm-block', uid: 'ffffffffffff', on: true }); x2.send({ t: 'dm-block', uid: x2.uid, on: true }); await wait(300);
   assert(!x2.msgs.some((m) => m.t === 'blocks' && m.list.includes('ffffffffffff')) && !x2.msgs.some((m) => m.t === 'blocks' && m.list.includes(x2.uid)), '모르는 사람이나 나 자신은 차단할 수 없음');
   for (const c of [x1, x2, x2c]) c.send({ t: 'bye' }); // 유예 없이 바로 정리해서 뒤의 점검에 퇴장 알림이 섞이지 않게
   await wait(400);
+}
+
+// 쪽지 종단 암호화: 키 맡기기·바꾸기, 상대 키가 바뀐 경우, 비밀번호 변경·초기화와 감싼 키, 변조 방지, 키가 없을 때
+async function e2eeCheck() {
+  const pwOf = (n) => 'pw-' + n + '-12345';
+  const fresh = async (name) => { // 키 없이 가입 → 키를 직접 만들어 맡긴다
+    const r = await api('/auth/signup', { name, password: pwOf(name), code: 'test-code' });
+    assert(r.ok, '가입'); const keys = await newKeys(pwOf(name));
+    assert((await api('/auth/keys', { token: r.token, pub: keys.pub, wrapped: keys.wrapped })).ok, '키 맡기기');
+    return { ...r, keys };
+  };
+  const A = await fresh('암호갑'), B = await fresh('암호을');
+  const a = client('e2-a-00000001', '암호갑', { token: A.token, keys: A.keys }), b = client('e2-b-00000001', '암호을', { token: B.token, keys: B.keys });
+  await a.open; await b.open; await wait(300);
+  const auid = a.myUid(), buid = b.myUid();
+
+  // 보내고 받기, 변조 방지
+  await a.dm(buid, '비밀 이야기');
+  const got = await until(() => b.find('dm'), '도착');
+  assert.equal((await b.reveal(got.msg)).t, '비밀 이야기', '받는 사람이 풂');
+  assert.equal((await a.reveal(got.msg)).t, '비밀 이야기', '보낸 사람도 자기 기기에서 다시 풀 수 있음');
+  await assert.rejects(() => b.reveal({ ...got.msg, to: auid }), '받는 사람·보낸 사람 번호를 바꾸면(변조) 풀리지 않음');
+  const bad = { ...got.msg, enc: { ...got.msg.enc, ct: got.msg.enc.ct.slice(0, -4) + 'AAAA' } };
+  await assert.rejects(() => b.reveal(bad), '암호문을 고치면 풀리지 않음');
+  const third = await fresh('암호병'); const c3 = client('e2-c-00000001', '암호병', { token: third.token, keys: third.keys }); await c3.open; await wait(200);
+  await assert.rejects(() => c3.reveal(got.msg), '제3자는 서버에서 받은 암호문을 풀 수 없음');
+
+  // 상대가 키를 바꾼 경우(비밀번호 초기화 등): 서버가 알려 주고, 새 키로 다시 보내면 도착
+  const nk = await newKeys(pwOf('암호을'));
+  assert((await api('/auth/keys', { token: B.token, pub: nk.pub, wrapped: nk.wrapped })).ok, '새 키 맡기기');
+  a.clear(); await a.dm(buid, '옛 키로 보냄', undefined, { kid: B.keys.kid, pub: B.keys.pub }); await wait(400);
+  const rk = a.find('dm-rekey');
+  assert(rk && rk.uid === buid && rk.kid === nk.kid && rk.pub === nk.pub, '상대 키가 바뀌었으면 새 키를 알려 주고 보내지 않음');
+  b.clear(); await a.dm(buid, '새 키로 보냄'); const got2 = await until(() => b.find('dm'), '새 키로 도착');
+  b.keys = nk;
+  assert.equal((await b.reveal(got2.msg)).t, '새 키로 보냄', '새 키로 보낸 쪽지는 바뀐 키로 풀림');
+  await assert.rejects(() => b.reveal(got.msg), '키를 잃은(바뀐) 쪽은 옛 쪽지를 풀 수 없음');
+  assert.equal((await a.reveal(got.msg)).t, '비밀 이야기', '보낸 사람은 상대의 지난 공개 키 기록으로 옛 쪽지를 계속 풀 수 있음');
+  a.send({ t: 'dm-keys', uid: buid }); const dk = await until(() => a.last('dm-keys'), '키 기록');
+  assert(dk.keys.length === 2 && !JSON.stringify(dk).includes('priv') && !JSON.stringify(dk).includes('wrapped'), '공개 키 기록에는 공개 키만 있음');
+
+  // 키가 없는 계정: 보낼 수도, 받을 수도 없음
+  const nokey = await api('/auth/signup', { name: '암호없음', password: pwOf('암호없음'), code: 'test-code' });
+  const n = client('e2-n-00000001', '암호없음', { token: nokey.token }); await n.open; await wait(300);
+  n.send({ t: 'dm', to: buid, enc: { s: 'abcd', r: nk.kid, iv: 'AAAAAAAAAAAAAAAA', ct: 'AAAA' } }); await wait(300);
+  assert.equal(n.find('dm-error')?.code, 'no-key', '쪽지 키를 맡기지 않은 계정은 보낼 수 없음');
+  a.clear(); await a.dm(n.myUid(), '받을 준비 안 된 사람에게', undefined, { kid: 'aaaaaaaaaaaaaaaa', pub: A.keys.pub }); await wait(300);
+  assert(a.find('dm-error')?.msg.includes('준비'), '상대에게 키가 없으면 안내함');
+  assert.equal((await api('/auth/keys', { token: nokey.token, pub: 'AAAA', wrapped: A.keys.wrapped })).error, 'keys', '길이가 맞지 않는 공개 키는 거절');
+  assert.equal((await api('/auth/keys', { token: nokey.token, pub: A.keys.pub, wrapped: { v: 1, s: 'AA', i: 5, iv: 'AA', ct: 'AA' } })).error, 'keys', '반복 횟수가 너무 적은 감싼 키는 거절');
+
+  // 비밀번호 바꾸기: 감싼 키도 새 비밀번호로 다시 감싸야 하고, 그러면 새 비밀번호로만 열림
+  const P = await fresh('암호정'); const W2 = await wrapPriv((await newKeys('x')).priv, 'x').catch(() => null);
+  const no = await api('/auth/password', { token: P.token, old: pwOf('암호정'), new: 'new-pass-word-1' });
+  assert.equal(no.error, 'keys', '감싼 키를 다시 감싸서 보내지 않으면 비밀번호를 바꿀 수 없음 (키를 잃지 않도록)');
+  const ps = await newKeys('new-pass-word-1');
+  const yes = await api('/auth/password', { token: P.token, old: pwOf('암호정'), new: 'new-pass-word-1', wrapped: ps.wrapped }); assert(yes.ok, '다시 감싸서 보내면 바뀜');
+  const kg = await api('/auth/keys/get', { token: yes.token });
+  assert(kg.keys && kg.keys.wrapped.ct === ps.wrapped.ct, '맡겨 둔 감싼 키가 새 것으로 바뀜');
+  await unwrapPriv(kg.keys.wrapped, 'new-pass-word-1'); await assert.rejects(() => unwrapPriv(kg.keys.wrapped, pwOf('암호정')), '옛 비밀번호로는 열리지 않음');
+
+  // 관리자가 비밀번호를 초기화하면 감싼 키는 사라진다 (이전 쪽지는 못 읽는다)
+  const adminTok = (await api('/auth/login', { name: '관리자', password: 'admin-pass-1' })).token;
+  const adm = client('e2-adm-0000001', '관리', { token: adminTok }); await adm.open; await wait(300);
+  const Q = await fresh('암호무'); const qc = client('e2-q-00000001', '암호무', { token: Q.token, keys: Q.keys }); await qc.open; await wait(300);
+  adm.send({ t: 'acct-reset', uid: qc.myUid() }); const rr = await until(() => adm.find('acct-reset'), '초기화');
+  const lg = await api('/auth/login', { name: '암호무', password: rr.temp });
+  assert(lg.ok && lg.keys === null, '초기화한 뒤 로그인하면 맡겨 둔 감싼 키가 없음 (새로 만들게 됨)');
+  assert((await api('/auth/keys/get', { token: lg.token })).keys === null, '키 목록 요청에도 없음');
+  for (const x of [a, b, c3, n, adm, qc]) x.ws.close();
+  await wait(300);
 }
 
 // 닉네임은 겹칠 수 없고, IP나 닉네임이 같다고 같은 사람으로 합쳐지지 않는다(예전 '같은 IP Sync'는 남의 쪽지를 읽는 구멍이라 없앴다).
@@ -359,7 +454,7 @@ async function nameCheck() {
   const c = client('nm-cid-c000001', '닉네임', { avatar: '', color: '#ffffff' }, { host: A }); await c.open; await wait(350);
   assert(c.find('name-taken') && !c.find('joined') && !c.find('inbox'), '같은 IP의 같은 닉네임도 들어올 수 없음 (같은 사람으로 합쳐지지 않음)');
   const d = client('nm-cid-d000009', '보내는이', { acct: true }); await d.open; await wait(200);
-  a.clear(); c.clear(); d.send({ t: 'dm', to: aj.me.uid, text: '나에게만 와야 함' }); await wait(400);
+  a.clear(); c.clear(); await d.dm(aj.me.uid, '나에게만 와야 함'); await wait(400);
   assert(a.find('dm') && !c.find('dm'), '쪽지는 그 닉네임을 쓰려던 다른 사람에게 가지 않음');
   const a2 = client('nm-cid-a000001', '닉네임', { acct: true }, { host: A }); await a2.open; await wait(300);
   assert(a2.find('joined') && !a2.find('name-taken'), '같은 기기(탭 두 개)는 그대로 들어올 수 있음');
@@ -395,11 +490,11 @@ async function dmOnlyCheck() {
   assert(!room.find('chat') && !room.find('voice') && !room.find('queue') && !room.find('share-start') && !room.closed, '쪽지만 쓰는 사람은 채팅·음성·대기열·공유·강퇴를 할 수 없음');
   d.send({ t: 'dm-members' }); await wait(250);
   assert(d.find('members')?.list.some((p) => p.uid === rj.me.uid && p.online), '쪽지 상대 목록에서 방 사람을 찾을 수 있음');
-  d.send({ t: 'dm', to: rj.me.uid, text: '방 밖에서 보낸 쪽지' }); await wait(350);
-  assert(room.find('dm')?.msg.text === '방 밖에서 보낸 쪽지', '방에 들어가지 않고도 쪽지를 보낼 수 있음');
+  await d.dm(rj.me.uid, '방 밖에서 보낸 쪽지'); await wait(350);
+  assert((await room.reveal(room.find('dm').msg)).t === '방 밖에서 보낸 쪽지', '방에 들어가지 않고도 쪽지를 보낼 수 있음');
   room.clear(); d.clear();
-  room.send({ t: 'dm', to: dj.me.uid, text: '답장' }); await wait(350);
-  assert(d.find('dm')?.msg.text === '답장', '방 사람의 답장이 쪽지만 쓰는 사람에게 도착함');
+  await room.dm(dj.me.uid, '답장'); await wait(350);
+  assert((await d.reveal(d.find('dm').msg)).t === '답장', '방 사람의 답장이 쪽지만 쓰는 사람에게 도착함');
   const late = client('do-late-0000001', '늦게온이'); await late.open; await wait(250);
   assert(!late.find('joined').users.some((u) => u.uid === dj.me.uid), '나중에 방에 들어온 사람의 참가자 목록에도 보이지 않음');
   const same = client('do-same-0000001', '쪽지러', {}, { host: '[::1]' }); await same.open; await wait(300);
@@ -497,7 +592,7 @@ async function hostCheck() {
 async function accountCheck() {
   const port = PORT + 900;
   const env = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: STATE + '.acct', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), SIGNUP_PER_HOUR: '40',
-    TOKEN_ROTATE_MS: '1500', TOKEN_GRACE_MS: '1200', RENAME_GAP_MS: '2500', NAME_RESERVE_MS: '2500', LOGIN_MAX_FAILS: '3', LOGIN_LOCK_MS: '1500', HOST_AWAY_MS: '1500', RESUME_GRACE_MS: '800' };
+    TOKEN_ROTATE_MS: '3000', TOKEN_GRACE_MS: '1200', RENAME_GAP_MS: '2500', NAME_RESERVE_MS: '2500', LOGIN_MAX_FAILS: '3', LOGIN_LOCK_MS: '1500', HOST_AWAY_MS: '1500', RESUME_GRACE_MS: '800' };
   const sv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env, stdio: 'ignore' });
   const O = { port }, post = (p, b) => api(p, b, O), pwOf = (n) => 'pw-' + n + '-12345';
   const signup = (name, extra = {}) => post('/auth/signup', { name, password: pwOf(name), code: 'test-code', ...extra });
@@ -549,12 +644,14 @@ async function accountCheck() {
     // ---- 토큰 순환과 도난 감지 ----
     const r1 = await signup('토큰순환'), t0 = r1.token;
     let a = await cl({ token: t0 }); assert(!a.find('joined').token, '3일이 지나기 전에는 토큰을 바꾸지 않음'); a.send({ t: 'bye' });
-    await wait(1500);
+    await wait(3100);
     a = await cl({ token: t0 }); const t1 = a.find('joined').token;
-    assert(t1 && t1 !== t0 && t1.includes('.'), '3일(테스트에서는 1.5초)이 지나면 새 토큰을 내려 줌'); a.send({ t: 'bye' });
-    const b = await cl({ token: t0 });
-    assert(b.find('joined')?.me.acct && !b.find('auth-expired') && !b.find('joined').token, '바뀐 직후의 옛 토큰은 유예 시간 동안 받아 줌'); b.send({ t: 'bye' });
-    await wait(1400);
+    assert(t1 && t1 !== t0 && t1.includes('.'), '3일(테스트에서는 3초)이 지나면 새 토큰을 내려 줌'); a.send({ t: 'bye' });
+    const b = await cl({ token: t0 }); // 새 토큰을 못 받았다고 치고(응답이 유실된 폰) 옛 토큰으로 다시 옴
+    assert(b.find('joined')?.me.acct && !b.find('auth-expired') && b.find('joined').token === t1, '옛 토큰이 유예 시간 안에 다시 오면 같은 새 토큰을 한 번 더 내려 줌 (끊긴 폰에서 로그인이 풀리지 않게)'); b.send({ t: 'bye' });
+    await wait(1300);
+    const e = await cl({ token: t1 });
+    assert(e.find('joined')?.me.acct && !e.find('auth-expired'), '유예가 끝난 뒤에도 새 토큰은 그대로 쓸 수 있음'); e.send({ t: 'bye' });
     const c = await cl({ token: t0 });
     assert(c.find('auth-expired')?.reuse === true && c.find('joined').me.acct === false, '유예가 끝난 옛 토큰이 다시 오면 도난으로 보고 알림');
     const d = await cl({ token: t1 });
@@ -602,9 +699,10 @@ async function accountCheck() {
 
     // ---- 계정 삭제: 상대 화면에는 "탈퇴한 사용자" ----
     const del = await signup('탈퇴할사람'), friend = await signup('남는사람');
-    const dc = await cl({ token: del.token }), fc = await cl({ token: friend.token });
+    for (const [acc, nm] of [[del, '탈퇴할사람'], [friend, '남는사람']]) { acc.keys = await newKeys(pwOf(nm)); assert((await post('/auth/keys', { token: acc.token, pub: acc.keys.pub, wrapped: acc.keys.wrapped })).ok, '키 등록'); }
+    const dc = await cl({ token: del.token, keys: del.keys }), fc = await cl({ token: friend.token, keys: friend.keys });
     const duid = dc.find('joined').me.uid, fuid = fc.find('joined').me.uid;
-    dc.send({ t: 'dm', to: fuid, text: '남기는 말' }); await until(() => fc.find('dm'), '쪽지 도착');
+    await dc.dm(fuid, '남기는 말'); await until(() => fc.find('dm'), '쪽지 도착');
     assert.equal((await post('/auth/delete', { token: del.token, password: 'nope-nope-12' })).error, 'bad', '비밀번호가 틀리면 삭제되지 않음');
     assert((await post('/auth/delete', { token: del.token, password: pwOf('탈퇴할사람') })).ok, '삭제됨');
     await wait(400);
@@ -612,8 +710,8 @@ async function accountCheck() {
     assert(fc.msgs.some((m) => m.t === 'renamed' && m.uid === duid && m.name === '탈퇴한 사용자' && m.deleted), '상대에게 "탈퇴한 사용자"로 알려짐');
     fc.clear(); fc.send({ t: 'dm-history', with: duid });
     const th = await until(() => fc.find('dm-thread'), '기록');
-    assert(th.msgs.some((m) => m.text === '남기는 말') && th.peer.name === '탈퇴한 사용자', '쪽지 기록은 상대에게 남고 이름은 "탈퇴한 사용자"');
-    fc.clear(); fc.send({ t: 'dm', to: duid, text: '탈퇴한 사람에게' }); fc.send({ t: 'dm-members' });
+    assert((await fc.texts(th.msgs)).includes('남기는 말') && th.peer.name === '탈퇴한 사용자', '쪽지 기록은 상대에게 남고(탈퇴한 사람의 공개 키 기록도 남아 있어서 풀림) 이름은 "탈퇴한 사용자"');
+    fc.clear(); await fc.dm(duid, '탈퇴한 사람에게'); fc.send({ t: 'dm-members' });
     assert((await until(() => fc.find('dm-error'), '오류')).msg.includes('탈퇴'), '탈퇴한 사용자에게는 보낼 수 없음');
     assert(!(await until(() => fc.find('members'), '목록')).list.some((p) => p.uid === duid), '쪽지 상대 목록에서도 빠짐');
     assert.equal((await post('/auth/login', { name: '탈퇴할사람', password: pwOf('탈퇴할사람') })).status, 401, '삭제한 계정으로는 로그인되지 않음');
@@ -642,33 +740,36 @@ async function accountCheck() {
     assert(hostG.closed, '관리자는 호스트도 내보낼 수 있음');
     await bye();
 
-    // ---- 계정 관리 (호스트·관리자) ----
+    // ---- 계정 관리는 관리자만: 호스트는 게스트일 수도 있고, 호스트가 남의 비밀번호를 초기화하면 그 계정을 가로채 쪽지를 읽을 수 있다 ----
     const mg = await signup('관리대상'), mgc = await cl({ token: mg.token }); // 맨 처음 들어온 로그인한 사람 = 호스트
     assert(mgc.find('joined').me.host, '맨 처음 들어온 계정이 호스트');
     const normal = await cl({}, '일반게스트');
-    normal.send({ t: 'acct-list' }); normal.send({ t: 'acct-reset', uid: mgc.find('joined').me.uid }); await wait(300);
-    assert(!normal.find('accts') && !normal.find('acct-reset'), '호스트가 아닌 사람은 계정 관리를 할 수 없음');
     const tgt = await signup('초기화대상'), tgtc = await cl({ token: tgt.token }), tuid = tgtc.find('joined').me.uid;
-    mgc.send({ t: 'acct-list' });
-    const list = (await until(() => mgc.find('accts'), '목록')).list;
-    assert(list.some((x) => x.uid === tuid && x.role === 'user' && x.online) && list.some((x) => x.role === 'admin' && x.name === '관리자'), '계정 목록(접속 여부, 관리자 표시)');
-    mgc.send({ t: 'acct-reset', uid: list.find((x) => x.role === 'admin').uid }); mgc.send({ t: 'acct-delete', uid: list.find((x) => x.role === 'admin').uid }); mgc.send({ t: 'acct-ban', uid: list.find((x) => x.role === 'admin').uid, on: true }); await wait(300);
-    assert(!mgc.find('acct-reset') && !mgc.find('acct-deleted') && (await post('/auth/login', { name: '관리자', password: 'admin-pass-1' })).ok, '관리자 계정은 초기화·삭제·밴할 수 없음');
-    mgc.send({ t: 'acct-reset', uid: tuid });
-    const rs = await until(() => mgc.find('acct-reset'), '임시 비밀번호');
-    assert(/^[A-Za-z0-9]{10}$/.test(rs.temp) && rs.name === '초기화대상', '임시 비밀번호가 호스트에게만 내려옴');
+    for (const who of [normal, mgc]) { who.send({ t: 'acct-list' }); who.send({ t: 'acct-reset', uid: tuid }); who.send({ t: 'acct-delete', uid: tuid }); who.send({ t: 'acct-ban', uid: tuid, on: true }); }
+    await wait(500);
+    assert(![normal, mgc].some((x) => x.find('accts') || x.find('acct-reset') || x.find('acct-deleted')) && !tgtc.find('logged-out') && !tgtc.find('banned') && (await post('/auth/login', { name: '초기화대상', password: pwOf('초기화대상') })).ok,
+      '호스트도 일반 참가자도 계정 목록·비밀번호 초기화·삭제·계정 밴을 할 수 없음 (호스트가 남의 계정을 가로채지 못하게)');
+    const adm = await cl({ token: (await post('/auth/login', { name: '관리자', password: 'admin-pass-1' })).token });
+    adm.send({ t: 'acct-list' });
+    const list = (await until(() => adm.find('accts'), '목록')).list, adminUid = list.find((x) => x.role === 'admin').uid;
+    assert(list.some((x) => x.uid === tuid && x.role === 'user' && x.online) && list.some((x) => x.role === 'admin' && x.name === '관리자'), '관리자에게는 계정 목록(접속 여부, 관리자 표시)이 보임');
+    adm.send({ t: 'acct-reset', uid: adminUid }); adm.send({ t: 'acct-delete', uid: adminUid }); adm.send({ t: 'acct-ban', uid: adminUid, on: true }); await wait(300);
+    assert(!adm.find('acct-reset') && !adm.find('acct-deleted') && (await post('/auth/login', { name: '관리자', password: 'admin-pass-1' })).ok, '관리자 계정은 초기화·삭제·밴할 수 없음');
+    adm.send({ t: 'acct-reset', uid: tuid });
+    const rs = await until(() => adm.find('acct-reset'), '임시 비밀번호');
+    assert(/^[A-Za-z0-9]{10}$/.test(rs.temp) && rs.name === '초기화대상', '임시 비밀번호가 관리자에게만 내려옴');
     await wait(300);
     assert(tgtc.find('logged-out')?.reason === 'reset' && !(await cl({ token: tgt.token })).find('joined').me.acct, '초기화하면 옛 로그인은 모두 풀림');
     const tl = await post('/auth/login', { name: '초기화대상', password: rs.temp }); assert(tl.ok && tl.mustChange === true, '임시 비밀번호로 로그인하면 새로 정해야 한다고 알려 줌');
     assert((await cl({ token: tl.token })).find('must-change'), '새 비밀번호를 정하기 전에는 입장할 수 없음');
     const np = await post('/auth/password', { token: tl.token, old: rs.temp, new: 'after-reset-pass-1' }); assert(np.ok, '임시 비밀번호로 새 비밀번호를 정함');
     assert((await cl({ token: np.token })).find('joined')?.me.acct, '새 비밀번호를 정하면 입장됨');
-    mgc.send({ t: 'acct-ban', uid: tuid, on: true }); await wait(300);
+    adm.send({ t: 'acct-ban', uid: tuid, on: true }); await wait(300);
     assert((await cl({ token: np.token })).find('banned'), '계정 밴: 그 계정은 들어올 수 없음');
-    mgc.send({ t: 'acct-ban', uid: tuid, on: false }); await wait(300);
+    adm.send({ t: 'acct-ban', uid: tuid, on: false }); await wait(300);
     assert((await cl({ token: np.token })).find('joined'), '계정 밴을 풀면 다시 들어옴');
-    mgc.send({ t: 'acct-delete', uid: tuid });
-    assert((await until(() => mgc.find('acct-deleted'), '삭제 응답')).uid === tuid, '호스트가 계정을 삭제함');
+    adm.send({ t: 'acct-delete', uid: tuid });
+    assert((await until(() => adm.find('acct-deleted'), '삭제 응답')).uid === tuid, '관리자가 계정을 삭제함');
     assert.equal((await post('/auth/login', { name: '초기화대상', password: 'after-reset-pass-1' })).status, 401, '삭제된 계정으로는 로그인되지 않음');
     await bye();
 
@@ -677,6 +778,28 @@ async function accountCheck() {
     for (let i = 0; i < 80 && !hit; i++) if ((await signup('도배' + i, { code: 'wrong' })).status === 429) hit = i;
     assert(hit > 0, '같은 IP에서 가입을 너무 많이 시도하면 막힘');
   } finally { sv.kill(); fs.rmSync(STATE + '.acct', { force: true }); }
+}
+
+// 프록시 뒤 운영(TRUST_PROXY): X-Forwarded-* 는 프록시가 보낸 것일 때만 믿는다. 실제 운영처럼 https를 강제(AUTH_ALLOW_HTTP 없음)하고 확인한다
+async function proxyCheck() {
+  const port = PORT + 960;
+  const run = (over = {}) => spawn(process.execPath, ['server.js'], { cwd: __dirname, stdio: 'ignore', env: { ...process.env, PORT: String(port), STATE_FILE: STATE + '.proxy', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'),
+    TRUST_PROXY: '1', AUTH_HOST: 'sirugc.kro.kr', AUTH_ALLOW_HTTP: '', SIGNUP_CODE: 'x', ADMIN_NAME: '', ADMIN_PASSWORD: '', PROXY_IP: '', ...over } });
+  const status = (headers) => new Promise((ok, no) => http.get({ host: '127.0.0.1', port, path: '/auth/status', headers }, (res) => { let d = ''; res.on('data', (x) => (d += x)); res.on('end', () => ok(JSON.parse(d))); }).on('error', no));
+  const https = { Host: 'sirugc.kro.kr', 'X-Forwarded-Proto': 'https' };
+  let sv = run();
+  try {
+    await wait(1400);
+    assert.equal((await status(https)).allowed, true, '프록시가 https로 넘긴 요청에서는 로그인·가입이 열림');
+    assert.equal((await status({ Host: 'sirugc.kro.kr' })).allowed, false, 'https 표시가 없으면 열리지 않음');
+    assert.equal((await status({ Host: 'sirugc.kro.kr', 'X-Forwarded-Proto': 'http' })).allowed, false, 'http로 들어온 요청은 열리지 않음');
+    assert.equal((await status({ ...https, Host: 'evil.example' })).allowed, false, '허용 목록에 없는 주소는 열리지 않음');
+    assert.equal((await status({ Host: '127.0.0.1', 'X-Forwarded-Host': 'sirugc.kro.kr', 'X-Forwarded-Proto': 'https' })).allowed, true, '프록시가 X-Forwarded-Host로 원래 주소를 알려도 됨');
+    sv.kill(); await wait(700); sv = run({ PROXY_IP: '203.0.113.9' }); await wait(1400);
+    assert.equal((await status(https)).allowed, false, '프록시가 아닌 곳이 https·주소 표시를 위조해도 믿지 않음 (PROXY_IP)');
+    sv.kill(); await wait(700); sv = run({ PROXY_IP: '127.0.0.1,::1' }); await wait(1400);
+    assert.equal((await status(https)).allowed, true, 'PROXY_IP에 있는 프록시가 보낸 요청은 믿음');
+  } finally { sv.kill(); fs.rmSync(STATE + '.proxy', { force: true }); }
 }
 
 // 2.0 첫 시작: 옛 저장 파일은 백업하고 새로 시작한다. 관리자·가입 코드는 설정 파일이 기준이다. 서버를 껐다 켜며 확인한다
@@ -692,7 +815,7 @@ async function migrationCheck() {
     const baks = fs.readdirSync(dir).filter((x) => x.startsWith(baseName + '.bak-'));
     assert(baks.length === 1 && JSON.parse(fs.readFileSync(path.join(dir, baks[0]), 'utf8')).hostKey === 'old-host-key', '옛 저장 파일이 .bak 으로 백업됨 (지워지지 않음)');
     const now = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert(now.schema === 2 && !now.hostKey && !now.salt && !Object.keys(now.dms).length && !Object.keys(now.subs).length && !now.bans.length && !Object.keys(now.members).length && now.vapid.publicKey !== 'old-pub', '쪽지, 푸시 구독, 밴, 호스트 키, 푸시 키가 새로 시작됨');
+    assert(now.schema === 3 && !now.hostKey && !now.salt && !Object.keys(now.dms).length && !Object.keys(now.subs).length && !now.bans.length && !Object.keys(now.members).length && now.vapid.publicKey !== 'old-pub', '쪽지, 푸시 구독, 밴, 호스트 키, 푸시 키가 새로 시작됨');
     const ad = await api('/auth/login', { name: '관리자', password: 'admin-pass-1' }, { port }); assert(ad.ok, '관리자가 설정 파일대로 만들어짐');
     assert(!fs.readFileSync(file, 'utf8').includes('admin-pass-1'), '저장 파일에 관리자 비밀번호 원문이 없음');
     await stop(sv);
@@ -712,6 +835,13 @@ async function migrationCheck() {
     assert.equal((await (await fetch(`http://localhost:${port}/auth/status`)).json()).signupOpen, false, '가입 코드가 없으면 가입이 닫혀 있다고 알림');
     assert.equal((await api('/auth/signup', { name: '새사람', password: 'some-password-1', code: '' }, { port })).error, 'closed', '가입 코드가 없으면 가입할 수 없음');
     c.send({ t: 'bye' });
+    // 쪽지가 암호화되기 전 버전(스키마 2)에서 올라오면 계정은 그대로 두고 평문 쪽지만 비운다
+    await stop(sv);
+    const keep = JSON.parse(fs.readFileSync(file, 'utf8')); keep.schema = 2; keep.dms = { 'a~b': [{ id: '9', from: 'a', to: 'b', text: '평문 쪽지', ts: Date.now() }] };
+    fs.writeFileSync(file, JSON.stringify(keep));
+    sv = run({}, ['ADMIN_NAME', 'ADMIN_PASSWORD', 'SIGNUP_CODE']); await wait(1500);
+    const mig = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(mig.schema === 3 && !Object.keys(mig.dms).length && Object.keys(mig.accounts).length >= 1 && !JSON.stringify(mig).includes('평문 쪽지'), '암호화 전 버전의 저장 파일은 계정을 남기고 평문 쪽지만 비움');
   } finally { sv.kill(); for (const x of fs.readdirSync(dir)) if (x.startsWith(baseName)) fs.rmSync(path.join(dir, x), { force: true }); }
 }
 
@@ -827,7 +957,7 @@ const fake = {
 };
 async function uploadCheck() {
   const base = 'http://localhost:' + PORT;
-  const post = (body, token, type = 'application/octet-stream') => fetch(base + '/upload', { method: 'POST', headers: { 'X-Token': token ?? '', 'Content-Type': type }, body });
+  const post = (body, token, type = 'application/octet-stream', extra = {}) => fetch(base + '/upload', { method: 'POST', headers: { 'X-Token': token ?? '', 'Content-Type': type, ...extra }, body });
   const u = client('up-cid-000000001', '업로더', { acct: true }); await u.open; await wait(300);
   const token = u.find('joined').upload;
   assert(typeof token === 'string' && token.length >= 16, '입장하면 업로드 토큰을 받음');
@@ -882,14 +1012,24 @@ async function uploadCheck() {
   const tuid = target.find('joined').me.uid; target.clear();
   target.send({ t: 'push-sub', sub: { endpoint: 'https://push.example.test/up', keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) } }, prefs: { dm: true, spoof: 'off' } }); await until(() => target.find('push-ok'), '구독');
   target.send({ t: 'vis', v: false }); await wait(200); sink.hits.length = 0; await wait(450);
-  u.send({ t: 'dm', to: tuid, text: '', media: { url: j.url, w: 10, h: 10 } });
+  const photo = fake.jpg(5000), encd = await encryptFile(photo);
+  const upr = await post(encd.blob, token, 'application/octet-stream', { 'X-Enc': '1' }), uj = await upr.json();
+  assert(upr.status === 200 && /^\/f\/[0-9a-f]{32}\.bin$/.test(uj.url) && uj.kind === 'enc', '기기에서 암호화한 파일은 종류를 모르는 덩어리(.bin)로 올라감');
+  const got = await fetch(base + uj.url), gotBuf = Buffer.from(await got.arrayBuffer());
+  assert(got.headers.get('content-type') === 'application/octet-stream' && /attachment/.test(got.headers.get('content-disposition')) && gotBuf.equals(encd.blob) && !gotBuf.subarray(0, 3).equals(photo.subarray(0, 3)), '서버에 있는 것은 암호문 그대로이고 사진 모양이 아님 (바로 열리지도 않음)');
+  assert((await decryptFile(gotBuf, encd.key, encd.iv)).equals(photo), '쪽지 안에 든 키로 풀면 원래 사진이 나옴');
+  assert.equal((await post(fake.jpg(), token, 'application/octet-stream', { 'X-Enc': '1' })).status, 200, '암호화한 척 올린 파일도 그냥 덩어리로 보관(서버는 안을 보지 않음)');
+  o.clear(); u.send({ t: 'chat', text: '', media: { url: uj.url } }); await wait(500);
+  assert(!o.find('chat'), '암호화된 덩어리는 쪽지 전용이라 방 채팅에는 붙일 수 없음');
+  await u.dm(tuid, '', { url: uj.url, key: encd.key, iv: encd.iv, kind: 'image', w: 10, h: 10, type: 'image/jpeg' });
   const dmm = await until(() => target.find('dm'), '첨부 쪽지 도착');
-  assert(dmm.msg.media.url === j.url && dmm.msg.text === '', '글 없이 사진만 보낸 쪽지가 전달됨');
+  const pt = await target.reveal(dmm.msg);
+  assert(pt.m.url === uj.url && pt.m.key === encd.key && pt.t === '' && !JSON.stringify(dmm.msg).includes(encd.key), '첨부 쪽지는 받는 기기에서만 풀리고, 첨부 정보와 파일 키는 서버가 볼 수 없음');
   await until(() => sink.hits.length, '푸시');
-  assert.equal(sink.hits[0].payload.body, '(사진)', '푸시에는 "(사진)"이라고만 나옴');
+  assert.equal(sink.hits[0].payload.body, '새 쪽지가 왔어요', '푸시에는 "새 쪽지가 왔어요"만 나옴 (내용·종류는 서버도 모름)');
   target.ws.close(); await wait(200);
   const t2 = client('t-cid-00000000001', '받는이', { acct: true }); await t2.open; await wait(300);
-  assert.equal(t2.find('joined').inbox[0].last.text, '(사진)', '목록 미리보기도 "(사진)"');
+  assert((await t2.preview(t2.find('joined').inbox[0])).m.url === uj.url, '목록 미리보기도 받는 기기가 풂');
   for (const c of [u, q, o, t2]) c.ws.close();
 }
 // 오래된 파일 자동 삭제와 서버 전체 용량 한도
@@ -952,5 +1092,5 @@ async function configCheck() {
 
 sinkServer.listen(PORT + 300, '127.0.0.1');
 const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', RESUME_GRACE_MOBILE_MS: '4500', AWAY_MS: '500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
-wait(1000).then(main).then(dmFullCheck).then(nameCheck).then(dmOnlyCheck).then(hostCheck).then(accountCheck).then(migrationCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
+wait(1000).then(main).then(dmFullCheck).then(e2eeCheck).then(nameCheck).then(dmOnlyCheck).then(hostCheck).then(accountCheck).then(migrationCheck).then(proxyCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
   .finally(() => { sinkServer.close(); srv.kill(); fs.rmSync(STATE, { force: true }); process.exit(); });

@@ -18,7 +18,7 @@ function deviceKind() {
 const icon = (id) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'i'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = `<use href="#${id}"/>`; return s; };
 
 let profileEdited = false, wantDm = false, dmOnly = false; // 입장 화면에서 '쪽지함' 버튼을 눌렀는지 / 서버가 그렇게 받아 주었는지
-let ws, me, isHost = false, canQueue = false, // isHost: 호스트 또는 관리자(호스트의 일을 할 수 있음) / canQueue: 대기열에 영상을 올릴 수 있음
+let ws, me, isHost = false, isAdmin = false, canQueue = false, // isHost: 호스트 또는 관리자(호스트의 일을 할 수 있음) / canQueue: 대기열에 영상을 올릴 수 있음
    sharerId = null, users = [], ended = false, joined = false, openUser = null;
 // 의미색 버튼: go(초록) / blue(파랑) / stop(빨강) 중 하나만 켠다
 const setTone = (b, tone) => ['go', 'blue', 'stop'].forEach((c) => b.classList.toggle(c, c === tone));
@@ -286,7 +286,7 @@ function stopEverything() {
 // 끊겼다가 같은 세션으로 돌아왔을 때: 방 상태만 새로 맞추고 열려 있는 것(음성, 공유, 대화창)은 건드리지 않는다
 function applyResume(m, wasReconnecting) {
   uploadToken = m.upload || uploadToken;
-  isHost = !!(m.me.host || m.me.admin); canQueue = !!m.me.canQueue; me = m.me.id; users = m.users.concat(m.me);
+  isHost = !!(m.me.host || m.me.admin); isAdmin = !!m.me.admin; canQueue = !!m.me.canQueue; me = m.me.id; users = m.users.concat(m.me);
   $('#banBox').hidden = !isHost; renderBans(m.bans); renderUsers();
   voiceList = m.voice || []; syncVoicePeers(); renderVoice();
   queue = m.queue || []; renderQueue();
@@ -342,7 +342,7 @@ Object.assign(handlers, {
     }
     firstJoined = true;
     joined = true;
-    me = m.me.id; isHost = !!(m.me.host || m.me.admin); canQueue = !!m.me.canQueue; users = m.users.concat(m.me);
+    me = m.me.id; isHost = !!(m.me.host || m.me.admin); isAdmin = !!m.me.admin; canQueue = !!m.me.canQueue; users = m.users.concat(m.me);
     dmOnly = !!m.dmOnly; // 서버가 쪽지만 쓰는 연결로 받아 줬을 때만 (옛 서버라면 방으로 들어온 것이니 방 화면 그대로)
     document.body.classList.toggle('dm-only', dmOnly); $('#toRoom').hidden = !dmOnly;
     $('.skip').setAttribute('href', dmOnly ? '#dmNew' : '#chatIn'); $('.skip').textContent = dmOnly ? '새 쪽지 버튼으로 건너뛰기' : '채팅 입력으로 건너뛰기';
@@ -372,7 +372,7 @@ Object.assign(handlers, {
     const at = users.findIndex((x) => x.id === m.user.id);
     if (at < 0) return;
     users[at] = m.user;
-    if (m.user.id === me) { isHost = !!(m.user.host || m.user.admin); canQueue = !!m.user.canQueue; $('#banBox').hidden = !isHost; renderQueue(); }
+    if (m.user.id === me) { isHost = !!(m.user.host || m.user.admin); isAdmin = !!m.user.admin; canQueue = !!m.user.canQueue; $('#banBox').hidden = !isHost; renderQueue(); }
     renderUsers();
   },
   host(m) { sys(m.id === me ? '이제 내가 이 방의 호스트예요.' : m.name + ' 님이 호스트가 됐어요.'); },

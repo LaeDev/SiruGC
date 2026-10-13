@@ -21,8 +21,9 @@ const MAX_CONCURRENT = 4;
 const TYPES = { // 확장자 → [Content-Type, 종류]
   jpg: ['image/jpeg', 'image'], png: ['image/png', 'image'], gif: ['image/gif', 'image'], webp: ['image/webp', 'image'],
   mp4: ['video/mp4', 'video'], mov: ['video/quicktime', 'video'], webm: ['video/webm', 'video'],
+  bin: ['application/octet-stream', 'enc'], // 쪽지에 첨부한 파일: 보내는 기기에서 암호화돼서 올라온다. 서버는 안을 볼 수 없다
 };
-const NAME_RE = /^[0-9a-f]{32}\.(jpg|png|gif|webp|mp4|mov|webm)$/;
+const NAME_RE = /^[0-9a-f]{32}\.(jpg|png|gif|webp|mp4|mov|webm|bin)$/;
 
 // 파일 앞부분으로 형식을 알아낸다. 모르는 형식(HTML, SVG, 실행 파일, HEIC 사진 등)은 null.
 function sniff(b) {
@@ -71,6 +72,7 @@ module.exports = function createUploads({ findByToken, send }) {
     const len = Number(req.headers['content-length']);
     if (!Number.isFinite(len) || len <= 0) return fail(res, 411, '파일 크기를 알 수 없어요');
     if (len > Math.max(MAX.image, MAX.video)) return fail(res, 413, '파일이 너무 커요');
+    const isEnc = req.headers['x-enc'] === '1';
     const now = Date.now();
     ws.uploads = (ws.uploads || []).filter((u) => u.t > now - 3600e3);
     if (ws.uploading || active >= MAX_CONCURRENT) return fail(res, 429, '다른 파일을 올리는 중이에요. 잠시 뒤에 다시 해 주세요');
@@ -93,10 +95,11 @@ module.exports = function createUploads({ findByToken, send }) {
     out.on('error', () => abort(500, '저장하지 못했어요'));
     out.on('finish', () => {
       if (over) return;
-      const ext = sniff(head);
+      const ext = isEnc ? 'bin' : sniff(head);
       if (!ext) return abort(415, '사진(JPG, PNG, GIF, WebP)이나 동영상(MP4, WebM, MOV)만 올릴 수 있어요');
       const [, kind] = TYPES[ext];
-      if (got > MAX[kind]) return abort(413, `${kind === 'image' ? '사진' : '동영상'}은 ${Math.round(MAX[kind] / MB)}MB까지 올릴 수 있어요`);
+      const limit = kind === 'enc' ? MAX.video + 64 : MAX[kind]; // 암호화된 파일은 종류를 몰라서 동영상 한도를 쓴다 (암호화로 조금 커진다)
+      if (got > limit) return abort(413, `${kind === 'image' ? '사진' : '동영상'}은 ${Math.round(MAX[kind === 'enc' ? 'video' : kind] / MB)}MB까지 올릴 수 있어요`);
       const name = crypto.randomBytes(16).toString('hex') + '.' + ext;
       fs.rename(tmp, path.join(DIR, name), (err) => {
         if (err) return abort(500, '저장하지 못했어요');
@@ -116,7 +119,7 @@ module.exports = function createUploads({ findByToken, send }) {
       const [type] = TYPES[name.split('.')[1]];
       const base = {
         'Content-Type': type, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff',
-        'Content-Security-Policy': "default-src 'none'; sandbox", 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Disposition': 'inline',
+        'Content-Security-Policy': "default-src 'none'; sandbox", 'Cross-Origin-Resource-Policy': 'same-origin', 'Content-Disposition': type === 'application/octet-stream' ? 'attachment' : 'inline',
       };
       const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
       if (m && (m[1] || m[2])) {
@@ -142,7 +145,7 @@ module.exports = function createUploads({ findByToken, send }) {
   // 채팅/쪽지 메시지에 붙은 media 정보를 믿지 않고 다시 확인한다: 우리가 저장한 파일이 실제로 있어야 한다.
   function validMedia(m) {
     const x = m && typeof m.url === 'string' && /^\/f\/([0-9a-f]{32}\.\w+)$/.exec(m.url);
-    if (!x || !NAME_RE.test(x[1]) || !fs.existsSync(path.join(DIR, x[1]))) return null;
+    if (!x || !NAME_RE.test(x[1]) || x[1].endsWith('.bin') || !fs.existsSync(path.join(DIR, x[1]))) return null; // 채팅에는 열어 볼 수 있는 사진·동영상만 (암호화된 덩어리는 쪽지 전용)
     const dim = (v) => (Number.isFinite(Number(v)) && Number(v) >= 1 && Number(v) <= 10000 ? Math.round(Number(v)) : undefined);
     return { url: m.url, kind: TYPES[x[1].split('.')[1]][1], w: dim(m.w), h: dim(m.h) };
   }

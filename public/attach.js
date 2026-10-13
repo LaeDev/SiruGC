@@ -28,10 +28,10 @@ function videoSize(file) { // 메시지 칸을 미리 잡아 두려고 크기만
     v.preload = 'metadata'; v.muted = true; v.onloadedmetadata = () => done(v.videoWidth || undefined, v.videoHeight || undefined); v.onerror = () => done(); setTimeout(done, 4000); v.src = u;
   });
 }
-function uploadBlob(blob, onProgress) {
+function uploadBlob(blob, onProgress, enc) {
   return new Promise((ok, no) => {
     const x = new XMLHttpRequest();
-    x.open('POST', '/upload'); x.setRequestHeader('X-Token', uploadToken);
+    x.open('POST', '/upload'); x.setRequestHeader('X-Token', uploadToken); if (enc) x.setRequestHeader('X-Enc', '1'); // 쪽지 첨부는 기기에서 암호화한 덩어리 (서버는 내용을 보지 않는다)
     x.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     x.onload = () => {
       let j = {}; try { j = JSON.parse(x.responseText); } catch {}
@@ -60,11 +60,13 @@ async function attach(file, t) {
   try {
     const kind = mediaKind(file);
     const prep = kind === 'image' ? await prepareImage(file) : { blob: file, ...(await videoSize(file)) };
-    const j = await uploadBlob(prep.blob, (p) => (line.textContent = `올리는 중 ${Math.round(p * 100)}%`));
-    const input = t.kind === 'dm' ? $('#dmIn') : $('#chatIn'), text = input.value.trim(); // 입력창에 써 둔 글은 설명으로 같이 보낸다
-    const media = { url: j.url, w: prep.w, h: prep.h };
-    const sent = t.kind === 'dm' ? sendPaced('dm', { t: 'dm', to: t.uid, text, media }) : sendPaced('chat', { t: 'chat', text, media });
-    if (!sent) throw new Error('연결이 끊겨서 보내지 못했어요. 다시 연결되면 한 번 더 올려 주세요.');
+    if (t.kind === 'dm' && dmLocked()) throw new Error('쪽지 보안 키가 잠겨 있어요. 쪽지 목록에서 비밀번호로 열어 주세요.');
+    const dm = t.kind === 'dm', e = dm ? await encFile(prep.blob) : null; // 쪽지: 파일마다 무작위 키로 암호화해서 올리고, 그 키는 쪽지 안에 넣는다
+    const j = await uploadBlob(dm ? e.blob : prep.blob, (p) => (line.textContent = `올리는 중 ${Math.round(p * 100)}%`), dm);
+    const input = dm ? $('#dmIn') : $('#chatIn'), text = input.value.trim(); // 입력창에 써 둔 글은 설명으로 같이 보낸다
+    const sent = dm ? await dmSend(t.uid, text, { url: j.url, key: e.key, iv: e.iv, kind, type: prep.blob.type || file.type, w: prep.w, h: prep.h })
+      : sendPaced('chat', { t: 'chat', text, media: { url: j.url, w: prep.w, h: prep.h } });
+    if (!sent) throw new Error(dm ? '보내지 못했어요. 한 번 더 올려 주세요.' : '연결이 끊겨서 보내지 못했어요. 다시 연결되면 한 번 더 올려 주세요.');
     input.value = ''; line.remove();
   } catch (e) {
     line.textContent = e.message || '올리지 못했어요.'; line.classList.add('err');
@@ -77,18 +79,23 @@ const expiredNote = () => el('p', { className: 'expired', textContent: '파일�
 function mediaNode(m) {
   const box = el('div', { className: 'media' });
   if (m.w && m.h) box.style.aspectRatio = `${m.w} / ${m.h}`; // 불러오는 동안 칸이 흔들리지 않게
-  if (m.kind === 'image') {
-    const img = el('img', { src: m.url, alt: '보낸 사진', loading: 'lazy', decoding: 'async' });
-    img.onerror = () => { box.style.aspectRatio = ''; box.replaceChildren(expiredNote()); };
-    const b = el('button', { type: 'button', className: 'mbtn', onclick: () => openLightbox(m.url) }, img);
-    b.setAttribute('aria-label', '사진 크게 보기');
-    box.append(b);
-  } else {
-    const v = el('video', { src: m.url, controls: true, preload: 'metadata', playsInline: true });
-    v.muted = soundOff; // 모든 소리 끄기/패닉이 켜져 있으면 동영상도 소리 없이
-    v.onerror = () => { box.style.aspectRatio = ''; box.replaceChildren(expiredNote()); };
-    box.append(v);
-  }
+  const gone = () => { box.style.aspectRatio = ''; box.replaceChildren(expiredNote()); };
+  const build = (url) => {
+    if (m.kind === 'image') {
+      const img = el('img', { src: url, alt: '보낸 사진', loading: 'lazy', decoding: 'async' });
+      img.onerror = gone;
+      const b = el('button', { type: 'button', className: 'mbtn', onclick: () => openLightbox(url) }, img);
+      b.setAttribute('aria-label', '사진 크게 보기');
+      box.replaceChildren(b);
+    } else {
+      const v = el('video', { src: url, controls: true, preload: 'metadata', playsInline: true });
+      v.muted = soundOff; // 모든 소리 끄기/패닉이 켜져 있으면 동영상도 소리 없이
+      v.onerror = gone;
+      box.replaceChildren(v);
+    }
+  };
+  if (m.key) { box.append(el('p', { className: 'expired', textContent: '불러와서 푸는 중…' })); e2eeFile(m).then(build, gone); } // 쪽지 첨부: 암호화된 파일을 받아 이 기기에서 푼다
+  else build(m.url);
   return box;
 }
 const lightbox = $('#lightbox');

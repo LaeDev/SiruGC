@@ -49,6 +49,7 @@
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
   <symbol id="i-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
   <symbol id="i-tv" viewBox="0 0 24 24"><rect width="20" height="15" x="2" y="5" rx="2"/><path d="m10 9 5 3-5 3z"/><path d="M8 21h8"/></symbol>
 </svg>
@@ -135,8 +136,8 @@
       <button class="btn blue" id="shareBtn" type="button"><svg class="i" id="shareIcon"><use href="#i-screen"/></svg><span class="lbl" id="shareLbl">화면 공유</span></button>
     </div>
     <div class="top-util">
-      <button class="btn icon" id="soundBtn" type="button" aria-pressed="false" aria-label="모든 소리 끄기" title="모든 소리 끄기"><svg class="i" id="soundIcon"><use href="#i-volume"/></svg></button>
-      <button class="btn icon stop" id="panicBtn" type="button" aria-label="패닉: 소리를 끄고 화면 보호기 켜기" title="패닉: 소리 끄고 화면 보호기 (Esc 두 번)"><svg class="i"><use href="#i-eye-off"/></svg></button>
+      <button class="btn" id="soundBtn" type="button" aria-pressed="false" aria-label="모든 소리 끄기" title="모든 소리 끄기"><svg class="i" id="soundIcon"><use href="#i-volume"/></svg><span class="lbl" id="soundLbl">소리 끄기</span></button>
+      <button class="btn icon" id="panicBtn" type="button" aria-label="패닉: 소리를 끄고 화면 보호기 켜기" title="패닉: 소리 끄고 화면 보호기 (Esc 두 번)"><span aria-hidden="true">🛑</span></button>
       <button class="btn icon" id="settingsBtn" type="button" aria-haspopup="dialog" aria-label="설정" title="설정"><svg class="i"><use href="#i-sliders"/></svg></button>
     </div>
   </header>
@@ -214,6 +215,12 @@
         <p class="hint">쪽지는 로그인한 사람끼리만 주고받을 수 있어요.</p>
         <div class="dm-top" style="justify-content:center"><button class="btn primary" id="dmLogin" type="button">로그인 · 가입</button></div>
       </div>
+      <form class="scroll" id="dmLock" hidden>
+        <p class="hint">쪽지는 이 기기에서만 풀 수 있게 암호화돼요. 이 기기에서 처음 쓰거나 로그인 정보를 지웠다면, 계정 비밀번호로 한 번 열어 주세요.</p>
+        <label class="field"><span>계정 비밀번호</span><input type="password" id="dmLockPw" maxlength="64" autocomplete="current-password"></label>
+        <button class="btn primary" id="dmLockGo" type="submit">쪽지 열기</button>
+        <p class="msg-err" id="dmLockMsg" role="alert"></p>
+      </form>
       <div class="scroll" id="dmListWrap">
         <div class="dm-top"><button class="btn sm" id="toRoom" type="button" hidden><svg class="i"><use href="#i-tv"/></svg>방에 들어가기</button><button class="btn sm" id="dmNew" type="button"><svg class="i"><use href="#i-plus"/></svg>새 쪽지</button></div>
         <ul class="convs" id="dmList"></ul>
@@ -259,9 +266,28 @@
 <div id="net" role="status" aria-live="polite" hidden></div>
 
 <!-- 화면 보호기 (패닉 버튼): 켜져 있는 동안 뒤의 화면은 조작할 수 없다 -->
-<div id="saver" role="img" aria-label="화면 보호기. 아무 키나 누르거나 화면을 누르면 돌아가요" hidden>
+<!-- 패닉 화면의 강의 영상 (방에 들어오면 소리 없이 미리 재생해 둔다) -->
+<div id="lecture" aria-hidden="true"><div id="lecturePlayer"></div></div>
+<div id="saver" aria-label="화면 보호기. 화면을 한 번 누른 채 10초 동안 있으면 잠금 해제 화면이 나와요" hidden>
   <canvas id="saverCanvas"></canvas>
   <div id="saverClock" aria-hidden="true"></div>
+  <div class="lec-shield" id="lecShield" tabindex="0" role="button" aria-label="강의 화면 (눌러서 재생·정지, 10초 동안 누르고 있으면 잠금 해제)"></div>
+  <div class="lec-top"><span id="lecTitle"></span></div>
+  <div class="lec-bar" id="lecBar">
+    <button id="lecPlay" type="button" aria-label="정지"><svg class="i"><use href="#i-pause"/></svg></button>
+    <span id="lecTime">0:00 / 0:00</span>
+    <input type="range" id="lecSeek" min="0" max="1000" value="0" aria-label="재생 위치">
+    <button id="lecMute" type="button" aria-label="소리 켜기"><svg class="i"><use href="#i-volume-x"/></svg></button>
+    <input type="range" id="lecVol" min="0" max="100" value="0" aria-label="볼륨">
+  </div>
+  <div class="lec-hold" id="lecHold" aria-hidden="true"><b id="lecHoldN">3</b></div>
+  <form class="lec-auth" id="lecAuth" hidden novalidate>
+    <p id="lecAuthNote"></p>
+    <input type="password" id="lecPw" autocomplete="off" aria-label="비밀번호">
+    <input type="password" id="lecPw2" autocomplete="off" inputmode="numeric" maxlength="4" aria-label="PIN 한 번 더" placeholder="한 번 더" hidden>
+    <p class="lec-msg" id="lecAuthMsg" role="alert"></p>
+    <div class="lec-btns"><button type="button" id="lecCancel">돌아가기</button><button type="submit" id="lecGo">확인</button></div>
+  </form>
 </div>
 
 <!-- 로그인 · 가입 · 새 비밀번호 -->
@@ -332,7 +358,17 @@
       </section>
       <section aria-labelledby="hPanic">
         <h3 id="hPanic">소리와 패닉</h3>
-        <p class="note">헤더의 스피커 버튼은 영상·공유 화면·음성의 소리를 모두 꺼요. 눈 모양 패닉 버튼(또는 <kbd>Esc</kbd>를 빠르게 두 번)은 소리와 내 마이크를 끄고 화면 보호기를 띄워요. 화면 보호기는 아무 키나 누르면 돌아오고, 소리는 꺼진 채로 남아요.</p>
+        <p class="note">헤더의 스피커 버튼은 영상·공유 화면·음성의 소리를 모두 꺼요. 눈 모양 패닉 버튼(또는 <kbd>Esc</kbd>를 빠르게 두 번)은 소리와 내 마이크를 끄고, 채팅 위에 강의 영상을 전체 화면으로 띄워요. 마우스를 움직이면 강의 플레이어 컨트롤이 나와요. <b>풀려면 화면을 한 번 누른 채 10초 동안 있다가</b> 비밀번호(게스트는 4자리 PIN)를 넣어요. 소리는 꺼진 채로 남아요.</p>
+        <label class="chk"><input type="checkbox" id="panicPre"><span>강의를 소리 없이 미리 재생해 두기 (끄면 패닉을 누를 때 불러와요. 켜 두면 데이터와 배터리를 조금 써요)</span></label>
+        <label class="field"><span>강의 영상 바꾸기 (유튜브 링크. 비우면 기본 강의)</span><input type="text" id="panicVideoIn" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…"></label>
+        <div><button type="button" class="btn" id="panicVideoGo">영상 저장</button></div>
+        <p class="note" id="panicMsg" role="status"></p>
+        <div id="pinBox">
+          <p class="note" id="pinNow"></p>
+          <div class="row"><label class="field"><span>새 PIN (숫자 4자리)</span><input type="password" id="pinNew" inputmode="numeric" maxlength="4" autocomplete="off"></label><button type="button" class="btn" id="pinGo">PIN 저장</button></div>
+          <p class="note" id="pinMsg" role="status"></p>
+        </div>
+        <p class="note" id="pinAcct" hidden>로그인한 사람은 계정 비밀번호로 풀어요. PIN은 게스트만 써요. (PIN을 잊으면 브라우저의 이 사이트 데이터를 지우세요.)</p>
       </section>
       <section aria-labelledby="hApp">
         <h3 id="hApp">앱으로 설치</h3>
@@ -415,7 +451,7 @@
       </section>
       <section aria-labelledby="hAdmin" id="adminSec" hidden>
         <h3 id="hAdmin">계정 관리</h3>
-        <p class="note">호스트와 관리자에게만 보여요. 임시 비밀번호는 만든 사람의 화면에만 한 번 보여요.</p>
+        <p class="note">관리자에게만 보여요. 임시 비밀번호는 만든 사람의 화면에만 한 번 보여요.</p>
         <div><button type="button" class="btn" id="acctRefresh">목록 새로고침</button></div>
         <ul class="acctlist" id="acctList"></ul>
         <p class="note" id="acctMsg" role="status"></p>
@@ -430,6 +466,7 @@
 </dialog>
 
 <script src="/app.js"></script>
+<script src="/e2ee.js"></script>
 <script src="/auth.js"></script>
 <script src="/media.js"></script>
 <script src="/voice.js"></script>

@@ -41,6 +41,8 @@ module.exports = function createAccounts({ room, saveSoon, newId, cleanName, nam
 
   // ---- 잠금과 횟수 제한 (메모리에만 둔다: 재시작하면 풀려도 괜찮은 정도의 방어) ----
   const fails = new Map(), signups = new Map();
+  // 새 토큰을 내려 보낸 직후(유예 시간 동안)만 메모리에 들고 있는다 (파일에는 쓰지 않는다). 응답이 유실돼서 클라이언트가 옛 토큰으로 다시 오면 같은 새 토큰을 한 번 더 내려 준다
+  const resend = new Map();
   const lockLeft = (k) => { const f = fails.get(k); return f && f.until > Date.now() ? f.until - Date.now() : 0; };
   const failed = (k) => {
     let f = fails.get(k) || { n: 0, until: 0 };
@@ -83,11 +85,12 @@ module.exports = function createAccounts({ room, saveSoon, newId, cleanName, nam
       if (now - s.issuedAt >= ROTATE_MS) { // 3일이 지났으니 새 값으로
         const next = secret();
         s.prevHash = s.hash; s.prevUntil = now + GRACE_MS; s.hash = sha(next).toString('hex'); s.issuedAt = now;
-        token2 = sid + '.' + next; saveSoon();
+        token2 = sid + '.' + next; resend.set(sid, { token: token2, until: now + GRACE_MS }); saveSoon();
       }
     } else if (s.prevHash && same(h, s.prevHash)) {
       if (now > s.prevUntil) { delete sessions[sid]; saveSoon(); return { reuse: true }; } // 유예가 끝난 옛 값: 복사본이 돌아다니는 것이니 이 기기의 로그인을 끊는다
       s.lastUsed = now;
+      const again = resend.get(sid); if (again && again.until > now) token2 = again.token; // 새 토큰을 못 받았을 수 있으니 다시 알려 준다
     } else return null;
     return { acct: a, token: token2, sid };
   }
@@ -127,17 +130,19 @@ module.exports = function createAccounts({ room, saveSoon, newId, cleanName, nam
     if (!(await checkPassword(a, String(password ?? '')))) { failed(lk); return { error: 'bad' }; }
     fails.delete(lk); return { ok: true };
   }
-  async function changePassword(a, oldPw, newPw) {
+  // wrapped: 새 비밀번호로 다시 감싼 쪽지 비밀 키. 이미 맡겨 둔 키가 있는데 안 보내면 그 키는 새 비밀번호로 못 열게 되니 거절한다
+  async function changePassword(a, oldPw, newPw, wrapped) {
     if (a.role === 'admin') return { error: 'admin' }; // 관리자 비밀번호는 설정 파일에서만 바꾼다
     const c = await confirm(a, oldPw, 'pw'); if (!c.ok) return c;
     const prob = pwProblem(newPw, a.name); if (prob) return { error: 'password', msg: prob };
-    await setPassword(a, newPw); a.mustChange = false;
+    if (a.wrapped && !wrapped) return { error: 'keys', msg: '쪽지 보안 키를 새 비밀번호로 다시 감싸지 못했어요. 새로고침하고 다시 해 주세요.' };
+    await setPassword(a, newPw); a.mustChange = false; if (wrapped) a.wrapped = wrapped;
     revokeAll(a.id); // 모든 기기의 로그인이 풀린다. 이 기기는 새 토큰을 받는다
     return { ok: true, token: issue(a.id) };
   }
   async function resetPassword(a) { // 호스트·관리자가 임시 비밀번호를 발급한다. 그 비밀번호로 들어오면 바로 새로 정해야 한다
     const temp = Array.from(crypto.randomBytes(10), (b) => ALPHABET[b % ALPHABET.length]).join('');
-    await setPassword(a, temp); a.mustChange = true; revokeAll(a.id);
+    await setPassword(a, temp); a.mustChange = true; a.wrapped = null; revokeAll(a.id); // 비밀번호를 모르는 채로 초기화하면 감싸 둔 쪽지 키는 못 연다: 새로 만들게 되고 이전 쪽지는 읽을 수 없다
     return { ok: true, temp };
   }
   function rename(a, raw) {
@@ -191,6 +196,7 @@ module.exports = function createAccounts({ room, saveSoon, newId, cleanName, nam
     for (const [sid, s] of Object.entries(sessions)) if (!accounts[s.acct] || t - s.lastUsed > IDLE_MS) delete sessions[sid];
     for (const [k, f] of fails) if (f.until <= t && t - (f.until || 0) > LOCK_MS) fails.delete(k);
     for (const [k, r] of signups) if (r.reset < t) signups.delete(k);
+    for (const [k, r] of resend) if (r.until <= t) resend.delete(k);
     saveSoon();
   }
   setInterval(sweep, 3600e3).unref();
