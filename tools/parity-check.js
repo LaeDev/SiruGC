@@ -31,6 +31,7 @@ const MOBILES = [
 
 // ---- 브라우저 안에서 실행되는 화면 요약 (Function.toString으로 넘기므로 이스케이프 걱정이 없다) ----
 function snapshot() {
+  document.querySelectorAll('details').forEach((d) => (d.open = true)); // 접었다 펼 수 있는 칸은 두 화면 모두에 있는 컨트롤이다: 펼친 상태로 비교한다 (폰에서는 접어 두는 게 기본이라서)
   const vis = (e) => {
     const r = e.getBoundingClientRect(), cs = getComputedStyle(e);
     return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none' && !e.closest('[hidden]') && !e.closest('dialog:not([open])');

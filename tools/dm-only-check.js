@@ -3,6 +3,7 @@
 //  - '방에 들어가기'를 누르면 같은 닉네임으로 방에 들어간다
 //  - 설정 창의 설치 안내: 쓰는 기기에 맞는 순서가 펼쳐지고, 폰 화면(390px)에서 넘치지 않는다
 // 실행: node tools/dm-only-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능, SHOTS=폴더 로 화면 사진 저장)
+const { AUTH_ENV, signup, loginJs } = require('./_auth');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -23,7 +24,7 @@ const UA = {
 
 (async () => {
   const state = path.join(os.tmpdir(), `dmonly-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio', 'about:blank'], { stdio: 'ignore' });
   let failed = 0;
@@ -54,6 +55,7 @@ const UA = {
         await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
         await wait(150);
       };
+      p.login = async (name) => { await js(loginJs(await signup(PORT, name))); }; // 이 화면을 그 닉네임으로 로그인한 상태로 만든다
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!SHOTS) return; const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
@@ -70,8 +72,10 @@ const UA = {
     check(await P.js(`['#inboxBtn', '#enter'].every((s) => { const b = document.querySelector(s).getBoundingClientRect(); return b.height >= 44 && b.left >= 0 && b.right <= innerWidth; })`), '두 버튼 모두 터치 크기(44px) 이상이고 화면 안에 있음');
     check(await P.js(`document.querySelector('#enter').getBoundingClientRect().bottom <= document.querySelector('#inboxBtn').getBoundingClientRect().top`), '폰에서는 "입장하기"가 위, "쪽지함"이 아래로 쌓임');
     await P.tap('#inboxBtn');
-    check(await P.js(`document.querySelector('#joinMsg').textContent.includes('닉네임') && !joined`), '닉네임 없이 "쪽지함"을 누르면 닉네임을 입력하라고 안내함');
-    await P.type('#nameIn', '쪽지러');
+    check(await P.js(`document.querySelector('#authDlg').open && !joined && document.querySelector('#authNote').textContent.includes('쪽지함은 로그인')`), '로그인하지 않고 "쪽지함"을 누르면 로그인 창이 열리고 이유를 알려 줌');
+    await P.js(`document.querySelector('#authClose').click()`); await wait(200);
+    await P.login('쪽지러');
+    check(await P.js(`document.querySelector('#nameIn').readOnly && document.querySelector('#nameIn').value === '쪽지러' && document.querySelector('#acctBox').textContent.includes('로그인했어요')`), '로그인하면 닉네임이 내 계정 이름으로 고정되고 로그인 상태가 보임');
     await P.js(`document.querySelector('#inboxBtn').scrollIntoView({ block: 'center' })`); await P.shot('1-join-phone');
     await P.tap('#inboxBtn'); await wait(1500);
 
@@ -88,7 +92,7 @@ const UA = {
     await P.shot('2-dmonly-phone');
 
     console.log('방 사람 쪽 (PC 1280px)');
-    const R = await page(1280, 860, false); await R.type('#nameIn', '방사람'); await R.tap('#enter'); await wait(1500);
+    const R = await page(1280, 860, false); await R.login('방사람'); await R.tap('#enter'); await wait(1500);
     check(await R.js(`joined && !dmOnly && isHost`), '쪽지만 쓰는 사람이 먼저 와 있어도, 방에 처음 들어온 사람이 호스트가 됨');
     check(await R.js(`!users.some((u) => u.name === '쪽지러') && !document.body.textContent.includes('쪽지러 님이 들어왔어요')`), '방 사람에게 쪽지만 쓰는 사람은 보이지 않음');
 
@@ -111,12 +115,12 @@ const UA = {
     await P.tap('#dmBack'); check(await P.js(`!document.querySelector('#toRoom').hidden && document.querySelector('#toRoom').getBoundingClientRect().width > 0`), '대화창에서 뒤로 가면 목록 화면에 "방에 들어가기" 버튼이 보임');
     await P.tap('#toRoom'); await P.until(`typeof joined !== 'undefined' && joined && document.querySelector('#toRoom').hidden`, 10000); await wait(800);
     check(await P.js(`joined && !dmOnly && !document.body.classList.contains('dm-only') && getComputedStyle(document.querySelector('#stage')).display !== 'none'`), '"방에 들어가기"를 누르면 같은 닉네임으로 방 화면이 열림 (다시 입력할 필요 없음)');
-    check(await P.js(`users.some((u) => u.name === '방사람') && document.querySelector('.logo .t').textContent === '방 채팅'`), '방 참가자와 제목이 방 화면대로 돌아옴');
+    check(await P.js(`users.some((u) => u.name === '방사람') && document.querySelector('.logo .t').textContent === '시루 그룹챗'`), '방 참가자와 제목이 방 화면대로 돌아옴');
     check(await R.until(`document.body.textContent.includes('쪽지러 님이 들어왔어요')`), '그때서야 방 사람에게 입장 알림이 감');
     await P.shot('5-in-room-phone');
 
     console.log('쪽지함 화면 (PC 1280px)');
-    const D = await page(1280, 860, false); await D.type('#nameIn', '쪽지데스크'); await D.js("document.querySelector('#enter').scrollIntoView({ block: 'end' })"); await D.shot('0-join-desktop'); await D.tap('#inboxBtn'); await wait(1500);
+    const D = await page(1280, 860, false); await D.login('쪽지데스크'); await D.js("document.querySelector('#enter').scrollIntoView({ block: 'end' })"); await D.shot('0-join-desktop'); await D.tap('#inboxBtn'); await wait(1500);
     check(await D.js(`dmOnly && (() => { const s = document.querySelector('.side').getBoundingClientRect(); return s.width <= 761 && Math.abs((s.left + s.right) / 2 - innerWidth / 2) < 2; })()`), 'PC에서는 쪽지 패널이 가운데에 좁게 놓임');
     await D.shot('6-dmonly-desktop');
 

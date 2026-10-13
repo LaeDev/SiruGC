@@ -1,6 +1,7 @@
 // 쪽지 완성 기능을 실제 브라우저 세 창으로 확인한다.
 //  새 쪽지(접속 안 한 사람도 고르기·검색), 읽음/전송됨 표시, 내 쪽지 삭제(상대 화면에서도 사라짐), 대화 정리(내 화면만), 차단/해제, 날짜 구분선, 폰 화면 맞춤
 // 실행: node tools/dm-full-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
+const { AUTH_ENV, signup, loginJs } = require('./_auth');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -15,7 +16,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
 
 (async () => {
   const state = path.join(os.tmpdir(), `dmfull-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, RESUME_GRACE_MS: '1500', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, RESUME_GRACE_MS: '1500', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { stdio: 'ignore' });
   let failed = 0;
@@ -36,7 +37,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Emulation.setDeviceMetricsOverride', { width: size.w, height: size.h, deviceScaleFactor: size.mobile ? 2 : 1, mobile: !!size.mobile });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
       await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
-      await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); window.confirm = () => true; })()`); await wait(1000);
+      await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); window.confirm = () => true; })()`); await wait(1000);
       return { js, call, name, targetId };
     }
     const until = async (p, expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await p.js(expr)) return true; await wait(200); } return false; };

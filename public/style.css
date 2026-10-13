@@ -18,13 +18,14 @@ button{cursor:pointer;touch-action:manipulation}
 :focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 [hidden]{display:none!important}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.skip{position:absolute;left:8px;top:-60px;background:var(--accent);color:var(--on-accent);padding:8px 16px;border-radius:var(--r-ctl);z-index:100;font-weight:600}
+body{word-break:keep-all;overflow-wrap:break-word}
+.skip{min-height:44px;display:inline-flex;align-items:center;position:absolute;left:8px;top:-60px;background:var(--accent);color:var(--on-accent);padding:8px 16px;border-radius:var(--r-ctl);z-index:100;font-weight:600}
 .skip:focus{top:8px}
 svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 /* ---------- 버튼/입력 ---------- */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border-radius:var(--r-ctl);border:1.5px solid var(--line);background:var(--surface);font-weight:500;transition:background-color .18s var(--ease),border-color .18s var(--ease),transform .18s var(--ease)}
-.btn:hover:not(:disabled){border-color:var(--muted);background:var(--surface-2)}
+@media (hover:hover){ .btn:not(.primary):not(.go):not(.blue):not(.stop):hover:not(:disabled){border-color:var(--muted);background:var(--surface-2)} }
 .btn:active:not(:disabled){transform:scale(.97)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
@@ -33,8 +34,8 @@ svg.i{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-widt
 .btn.sm{min-height:44px;padding:0 12px;font-size:14px}
 .field{display:grid;gap:6px}
 .field>span{font-size:14px;color:var(--muted);font-weight:500}
-input[type=text],input[type=search]{width:100%;min-height:48px;padding:0 14px;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-ctl);transition:border-color .18s}
-input[type=text]:hover{border-color:var(--muted)}
+input[type=text],input[type=search],input[type=password]{width:100%;min-height:48px;padding:0 14px;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-ctl);transition:border-color .18s}
+input[type=text]:hover,input[type=password]:hover{border-color:var(--muted)}
 input::placeholder{color:var(--muted)}
 .msg-err{margin:0;color:var(--danger);font-size:14px;min-height:21px}
 
@@ -51,11 +52,24 @@ input::placeholder{color:var(--muted)}
 .maker .lede{margin:0 0 24px;color:var(--muted)}
 .me{display:grid;gap:20px;align-content:start;justify-items:stretch}
 .me .av{margin:8px auto 8px}
-.actions{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:12px;justify-content:flex-end;align-items:center}
-.inbox-note{flex:1 1 100%;order:-1;margin:0;color:var(--muted);font-size:14px;text-align:right}
-.enter,.enter-alt{min-height:52px;font-size:17px}
-.enter{min-width:240px}
-.enter-alt{min-width:140px}
+.actions{display:grid;gap:10px}
+.inbox-note{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
+.enter,.enter-alt{min-height:52px;font-size:17px;width:100%}
+.acct{display:grid;gap:8px}
+.acct p{margin:0;font-size:14px;color:var(--muted)}
+.row{display:flex;gap:8px;align-items:end;flex-wrap:wrap}
+.row .field{flex:1 1 180px}
+.make-wrap{min-width:0}
+.make-wrap>summary{min-height:44px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:600;cursor:pointer;margin-bottom:12px}
+.make-wrap>summary small{font-weight:400;color:var(--muted);font-size:13px}
+.prev{font-size:12px;color:var(--muted);font-weight:400}
+details.sub{border:1.5px solid var(--line);border-radius:var(--r-ctl);padding:0 12px 12px;display:grid;gap:10px;margin:8px 0}
+details.sub>summary{min-height:44px;display:flex;align-items:center;font-weight:600;cursor:pointer}
+.acctlist{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.acctlist li{display:grid;gap:8px;padding:10px 12px;border:1.5px solid var(--line);border-radius:var(--r-ctl)}
+.acctlist .nm{font-weight:600}
+.acctlist .btns{display:flex;gap:8px;flex-wrap:wrap}
+.note.ok{color:var(--accent-text)}
 .make{display:grid;gap:24px;align-content:start;min-width:0}
 .make fieldset{border:0;margin:0;padding:0;min-width:0}
 .make legend{padding:0;margin-bottom:8px;font-size:14px;color:var(--muted);font-weight:500}
@@ -108,7 +122,7 @@ input::placeholder{color:var(--muted)}
 
 .side{position:relative;border-left:1.5px solid var(--line);display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--surface)}
 .stabs{display:flex;flex:none;border-bottom:1.5px solid var(--line)}
-.stabs button{flex:1;min-height:48px;display:flex;gap:6px;align-items:center;justify-content:center;border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);font-weight:500;transition:color .18s,border-color .18s}
+.stabs button{flex:1;min-height:48px;white-space:nowrap;padding:0 4px;display:flex;gap:6px;align-items:center;justify-content:center;border:0;border-bottom:3px solid transparent;background:none;color:var(--muted);font-weight:500;transition:color .18s,border-color .18s}
 .stabs button:hover{color:var(--text)}
 .stabs button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent-text)}
 .dot{min-width:20px;height:20px;padding:0 6px;border-radius:var(--r-pill);background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:600;display:inline-grid;place-items:center}
@@ -116,11 +130,13 @@ input::placeholder{color:var(--muted)}
 .panel{flex:1;min-height:0;display:flex;flex-direction:column}
 .scroll{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
 
-.users{list-style:none;margin:0;padding:12px;display:grid;gap:2px}
+.users{list-style:none;margin:0;padding:12px;display:grid;grid-template-columns:minmax(0,1fr);gap:2px}
+.users>li{min-width:0}
 .urow{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:6px 8px;border:0;border-radius:var(--r-ctl);background:none;text-align:left}
 button.urow{cursor:pointer}
 button.urow:hover{background:var(--surface-2)}
-.urow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.urow .nm{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;font-weight:500}
+.urow .nm>*{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tag{font-size:12px;font-weight:600;color:var(--on-accent);background:var(--accent);border-radius:var(--r-pill);padding:1px 8px}
 .tag.soft{background:none;color:var(--accent-text);border:1.5px solid var(--accent-text)}
 .urow .chev{width:18px;height:18px;color:var(--muted);transition:transform .2s var(--ease)}
@@ -145,11 +161,13 @@ button.urow:hover{background:var(--surface-2)}
 .sys{color:var(--muted);font-size:14px;text-align:center;overflow-wrap:anywhere}
 .send{display:flex;gap:8px;padding:12px 20px calc(16px + env(safe-area-inset-bottom));border-top:1.5px solid var(--line);flex:none}
 .send input{flex:1}
+.send input:disabled{opacity:.5;cursor:not-allowed}
 
 .qadd{display:flex;gap:8px;padding:12px 16px 8px;flex:none}
 .qadd input{flex:1}
 .qmsg{margin:0;padding:0 16px;color:var(--danger);font-size:14px;flex:none}
 .qmsg:empty{display:none}
+#qPerm{margin:0;padding:0 16px 8px}
 .now,.qlist li{display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:12px;align-items:center}
 .now{margin:8px 16px 12px;padding:12px;border:1.5px solid var(--accent-text);border-radius:var(--r-ctl);background:var(--bg)}
 .thumb{width:96px;aspect-ratio:16/9;border-radius:8px;background:var(--surface-2);object-fit:cover;display:block}
@@ -169,9 +187,6 @@ button.urow:hover{background:var(--surface-2)}
 @media (max-width:900px) and (orientation:portrait){
   .maker{grid-template-columns:1fr;gap:24px;padding:24px 20px}
   .maker h1{font-size:34px}
-  .actions{flex-direction:column-reverse;flex-wrap:nowrap;align-items:stretch}
-  .inbox-note{order:0;flex:none;text-align:left}
-  .enter,.enter-alt{min-width:0;width:100%}
   .app{display:flex;flex-direction:column;height:100vh;height:100dvh}
   .top{padding:8px 12px;gap:6px}
   .stage{padding:0;gap:0;overflow:visible;flex:none}
@@ -277,7 +292,7 @@ kbd{padding:1px 6px;border:1.5px solid var(--line);border-radius:6px;background:
 #saverClock{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:300 clamp(48px,12vw,140px)/1 var(--body);color:rgba(255,255,255,.22);font-variant-numeric:tabular-nums;letter-spacing:.02em;pointer-events:none}
 
 /* ---------- 연결이 끊겼을 때 안내 띠 ---------- */
-#net{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:900;max-width:calc(100% - 24px);padding:10px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#net{position:fixed;left:50%;top:var(--top-h,12px);transform:translateX(-50%);z-index:900;max-width:calc(100% - 24px);padding:10px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35)}
 #net[hidden]{display:none}
 
 /* ---------- 설정 창 보강: 구형 브라우저와 폰 ---------- */
@@ -322,6 +337,10 @@ input[type=range]{width:100%;min-height:44px;accent-color:var(--accent-text);cur
 
 /* ---------- 쪽지 완성: 새 쪽지, 읽음, 삭제, 날짜, 차단 ---------- */
 /* 쪽지만 쓰기: 영상·채팅·참가자·대기열을 숨기고 쪽지 패널만 가운데에 둔다 */
+.menu-wrap{position:relative;flex:none}
+.menu{position:absolute;right:0;top:calc(100% + 6px);z-index:20;display:grid;gap:6px;min-width:168px;padding:8px;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--r-ctl)}
+.menu[hidden]{display:none}
+.menu .btn{justify-content:flex-start;width:100%}
 .dm-only .top-media,.dm-only .stage,.dm-only .stabs,.dm-only .resizer{display:none}
 .dm-only .app{grid-template-columns:minmax(0,1fr)}
 .dm-only .side{width:100%;max-width:760px;margin:0 auto}
@@ -370,20 +389,21 @@ input[type=search]{width:100%;min-height:48px;padding:0 14px;background:var(--bg
 .resizing iframe,.resizing video{pointer-events:none}
 .bubble p,.sys{font-size:var(--chat-fs,16px)}
 .bubble b{font-size:calc(var(--chat-fs,16px) - 2px)}
-.bubble time{font-size:calc(var(--chat-fs,16px) - 4px)}
+.bubble time{font-size:max(12px,calc(var(--chat-fs,16px) - 4px))}
 .send input{font-size:max(16px,var(--chat-fs,16px))}
 @media (max-width:900px) and (orientation:portrait){
   /* 폰 세로: 채팅 영역을 줄이지 않도록 줄을 만들지 않고, 영상과 채팅 경계 가운데에 알약 손잡이를 얹는다. 줄 자체는 마우스를 통과시키고 알약(48x24)만 잡힌다 */
-  .resizer{display:block;left:0;right:0;top:0;bottom:auto;width:auto;height:24px;cursor:row-resize;pointer-events:none}
-  .resizer::after{content:'';display:block;width:48px;height:24px;max-height:none;margin:0 auto;pointer-events:auto;cursor:row-resize;border-radius:var(--r-pill);background:linear-gradient(var(--line),var(--line)) center/36px 5px no-repeat;transition:none}
-  .resizer:hover::after,.resizer.dragging::after{height:24px;width:48px;background:linear-gradient(var(--accent-text),var(--accent-text)) center/44px 5px no-repeat}
+  .resizer{display:block;position:relative;flex:none;left:0;right:0;top:0;bottom:auto;width:auto;height:12px;cursor:row-resize;pointer-events:none}
+  .resizer::before{content:'';position:absolute;left:50%;top:50%;width:88px;height:44px;transform:translate(-50%,-50%);pointer-events:auto;cursor:row-resize}
+  .resizer::after{content:'';display:block;width:48px;height:12px;max-height:none;margin:0 auto;pointer-events:none;border-radius:var(--r-pill);background:linear-gradient(var(--line),var(--line)) center/36px 5px no-repeat;transition:none}
+  .resizer:hover::after,.resizer.dragging::after{height:12px;width:48px;background:linear-gradient(var(--accent-text),var(--accent-text)) center/44px 5px no-repeat}
   .resizing{cursor:row-resize}
   html.video-h .frame{aspect-ratio:auto;height:var(--video-h)}
   html.video-h .empty{min-height:var(--video-h)}
 }
 
 /* 새 버전 안내: 열어 둔 화면이 옛 버전일 때 */
-#upd{position:fixed;left:50%;top:64px;transform:translateX(-50%);z-index:899;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 6px 6px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#upd{position:fixed;left:50%;top:calc(var(--top-h,12px) + 52px);transform:translateX(-50%);z-index:899;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 6px 6px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.35)}
 #upd .btn{min-height:44px;flex:none}
 
 /* 연결이 끊겨 자리를 비운 사람 (폰 화면이 꺼진 경우 등) */

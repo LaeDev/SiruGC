@@ -1,8 +1,8 @@
 /* ================= 설정 창: 테마 ================= */
 const THEME_GROUPS = [
-  ['다크', [['lamp-dark', '램프'], ['dracula', 'Dracula'], ['nord', 'Nord'], ['solarized-dark', 'Solarized Dark'], ['gruvbox-dark', 'Gruvbox Dark'],
+  ['다크', [['flat-dark', '플랫 다크'], ['lamp-dark', '램프'], ['dracula', 'Dracula'], ['nord', 'Nord'], ['solarized-dark', 'Solarized Dark'], ['gruvbox-dark', 'Gruvbox Dark'],
     ['catppuccin-mocha', 'Catppuccin Mocha'], ['tokyo-night', 'Tokyo Night'], ['rose-pine', 'Rosé Pine']]],
-  ['라이트', [['lamp-light', '램프'], ['nord-light', 'Nord Light'], ['solarized-light', 'Solarized Light'], ['gruvbox-light', 'Gruvbox Light'],
+  ['라이트', [['flat-light', '플랫 라이트'], ['lamp-light', '램프'], ['nord-light', 'Nord Light'], ['solarized-light', 'Solarized Light'], ['gruvbox-light', 'Gruvbox Light'],
     ['catppuccin-latte', 'Catppuccin Latte'], ['rose-pine-dawn', 'Rosé Pine Dawn']]],
 ];
 const settingsDlg = $('#settings');

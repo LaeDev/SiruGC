@@ -2,6 +2,7 @@
 //  버튼으로 실제 이미지 파일 올리기, 큰 사진 줄이기, 동영상(브라우저가 직접 녹화한 진짜 WebM), 붙여넣기, 사진 크게 보기,
 //  쪽지 첨부, 오류 안내, 만료된 파일 표시, 모든 소리 끄기와 동영상, 모바일에서 가로로 넘치지 않는지
 // 실행: node tools/attach-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
+const { AUTH_ENV, signup, loginJs } = require('./_auth');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -16,7 +17,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
 
 (async () => {
   const state = path.join(os.tmpdir(), `att-${Date.now()}.json`), upDir = path.join(os.tmpdir(), `att-up-${Date.now()}`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, UPLOAD_DIR: upDir, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, UPLOAD_DIR: upDir, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { stdio: 'ignore' });
   let failed = 0;
@@ -37,7 +38,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
       await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
-      await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
+      await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       const setFiles = async (selector, files) => { const { result: { root } } = await call('DOM.getDocument'); const { result: { nodeId } } = await call('DOM.querySelector', { nodeId: root.nodeId, selector }); await call('DOM.setFileInputFiles', { files, nodeId }); };
       return { js, call, setFiles };
     }

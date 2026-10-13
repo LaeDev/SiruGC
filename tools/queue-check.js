@@ -1,5 +1,5 @@
 // 대기열 순서 바꾸기(위로/아래로 버튼, 끌어서 옮기기)를 실제 브라우저 두 창으로 확인한다.
-//  호스트는 모두의 항목을, 일반 참가자는 자기 항목만 옮길 수 있고, 바뀐 순서는 모두에게 바로 보인다. 마우스와 폰 터치로 끌기 모두.
+//  대기열 조작(순서 바꾸기 등)은 호스트만 하고(올린 사람도 예외 없음), 호스트가 허락한 사람만 올릴 수 있다. 바뀐 순서는 모두에게 바로 보인다. 마우스와 폰 터치로 끌기 모두.
 // 실행: node tools/queue-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능. 유튜브 제목을 가져오려고 인터넷이 필요)
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -47,6 +47,7 @@ const VIDS = ['dQw4w9WgXcQ', 'jNQXAC9IVRw', 'aqz-KE-bpKQ', '9bZkp7q19f0', 'kJQP7
     const titles = (p) => p.js(`[...document.querySelectorAll('#qList li b')].map((b) => b.textContent).join('|')`);
 
     // 영상 5개를 올린다: 첫 번째는 바로 재생되고 나머지 4개가 줄을 선다 (호스트 3개 + 손님 1개)
+    await A.js(`send({ t: 'queue-grant', id: users.find((u) => u.name === '손님').id, on: true })`); await wait(400); // 손님이 올리려면 호스트의 허락이 필요하다
     for (const v of VIDS.slice(0, 4)) { await A.js(`send({ t: 'queue-add', videoId: '${v}' })`); await wait(1300); }
     await B.js(`send({ t: 'queue-add', videoId: '${VIDS[4]}' })`);
     check(await until(A, `document.querySelectorAll('#qList li').length === 4`) && await until(B, `document.querySelectorAll('#qList li').length === 4`), '호스트가 3개, 손님이 1개 올려서 대기열이 4개 (양쪽 화면)');
@@ -62,13 +63,9 @@ const VIDS = ['dQw4w9WgXcQ', 'jNQXAC9IVRw', 'aqz-KE-bpKQ', '9bZkp7q19f0', 'kJQP7
     await A.js(`document.querySelector('#qList li:first-child [aria-label="아래로 옮기기"]').click()`);
     check(await until(A, `[...document.querySelectorAll('#qList li')].map((l) => l.dataset.qid).join() === '${[ids[2], ids[0], ids[1], ids[3]].join()}'`), '맨 위에서 "아래로"를 누르면 2번째로 내려감');
 
-    console.log('권한: 손님은 자기가 올린 항목만');
-    const g = await B.js(`(() => { const lis = [...document.querySelectorAll('#qList li')]; return { total: lis.length, withBtns: lis.filter((l) => l.querySelector('.qbtns')).length, mineIsLast: !!lis[lis.length - 1].querySelector('.qbtns') }; })()`);
-    check(g.total === 4 && g.withBtns === 1, `손님 화면에는 자기 항목에만 조작 버튼이 있음 (${g.withBtns}개 / ${g.total}개)`);
-    check(await B.js(`!document.querySelector('#qList .grip') || document.querySelectorAll('#qList .grip').length === 1`), '손님에게 끌기 손잡이도 자기 항목 하나뿐');
-    const mine = await B.js(`document.querySelector('#qList .qbtns').closest('li').dataset.qid`); // 손님 화면에서 조작 버튼이 있는 항목 = 자기 것
-    await B.js(`document.querySelector('#qList .qbtns [aria-label="위로 옮기기"]').click()`);
-    check(await until(A, `[...document.querySelectorAll('#qList li')].map((l) => l.dataset.qid).join().includes('${mine}') && document.querySelectorAll('#qList li')[2].dataset.qid === '${mine}'`), '손님이 자기 항목을 올리면 호스트 화면에도 반영됨');
+    console.log('권한: 호스트가 아니면 자기가 올린 항목도 못 만짐');
+    const g = await B.js(`(() => { const lis = [...document.querySelectorAll('#qList li')]; return { total: lis.length, withBtns: lis.filter((l) => l.querySelector('.qbtns')).length, grips: document.querySelectorAll('#qList .grip').length, skip: !document.querySelector('#nowSkip').hidden }; })()`);
+    check(g.total === 4 && g.withBtns === 0 && g.grips === 0 && !g.skip, `손님 화면에는 조작 버튼·끌기 손잡이·건너뛰기가 하나도 없음 (버튼 ${g.withBtns}개 / 항목 ${g.total}개)`);
 
     console.log('끌어서 옮기기 (마우스)');
     const before = await order(A);

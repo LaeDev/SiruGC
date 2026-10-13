@@ -25,6 +25,22 @@
   --danger:#b3263a; --focus:#5b3df5; color-scheme:light;
 }
 
+/* 플랫: 그림자와 그라데이션 없이 회색 면과 얇은 선으로만 영역을 나누는 테마. 모서리도 작게 줄인다.
+   다크는 가장 어두운 면(헤더·영상 주변) → 패널 → 강조면 순으로 밝아지고, 라이트는 흰 바탕 + 연회색 패널이다. */
+[data-theme="flat-dark"] {
+  --bg:#1e1f22; --surface:#2b2d31; --surface-2:#383a40; --line:#41434a;
+  --text:#f2f3f5; --muted:#b5bac1; --accent:#4f5bd5; --on-accent:#ffffff; --accent-text:#a8b1ff;
+  --danger:#fa777c; --focus:#c9cdfb; color-scheme:dark;
+  --r-ctl:8px; --r-box:12px;
+}
+[data-theme="flat-light"] {
+  --bg:#ffffff; --surface:#f2f3f5; --surface-2:#e3e5e8; --line:#c4c7ce;
+  --text:#313338; --muted:#4e5058; --accent:#4752c4; --on-accent:#ffffff; --accent-text:#4752c4;
+  --danger:#c62d37; --focus:#4752c4; color-scheme:light;
+  --r-ctl:8px; --r-box:12px;
+}
+[data-theme^="flat-"] .qlist li.dragging { box-shadow:none; outline:1.5px solid var(--line); }
+
 [data-theme="dracula"] {
   --bg:#282a36; --surface:#343746; --surface-2:#44475a; --line:#6272a4;
   --text:#f8f8f2; --muted:#c3c6dc; --accent:#bd93f9; --on-accent:#1e1f29; --accent-text:#bd93f9;
@@ -87,7 +103,7 @@
 }
 
 /* 라이트 테마 공통 의미색: 밝은 배경에서도 구분되도록 진한 초록/파랑 + 흰 글자 (다크 테마는 style.css의 밝은 값을 그대로 씀) */
-[data-theme="lamp-light"], [data-theme="nord-light"], [data-theme="solarized-light"],
+[data-theme="lamp-light"], [data-theme="flat-light"], [data-theme="nord-light"], [data-theme="solarized-light"],
 [data-theme="gruvbox-light"], [data-theme="catppuccin-latte"], [data-theme="rose-pine-dawn"] {
   --ok:#15803d; --on-ok:#ffffff; --info:#1d4ed8; --on-info:#ffffff; --on-danger:#ffffff;
 }

@@ -80,13 +80,14 @@ $('#spoofSel').onchange = (e) => { notifPrefs.spoof = e.target.value; savePrefs(
 $('#pushTest').onclick = () => { send({ t: 'push-test' }); renderNotify('테스트 알림을 보냈어요. 잠시 뒤 알림이 뜨는지 보세요.'); };
 
 function notifyInit(m) {
+  $('#notifSec').hidden = !m.me.uid; // 쪽지 알림은 로그인한 사람만
   spoofs = m.spoofs || {}; vapidKey = m.vapid || '';
   const sel = $('#spoofSel');
   if (!sel.options.length) for (const [k, v] of Object.entries(spoofs)) sel.append(el('option', { value: k, textContent: v.label }));
   if (!spoofs[notifPrefs.spoof]) notifPrefs.spoof = 'off';
   applyTabIdentity(); renderNotify();
   send({ t: 'vis', v: !document.hidden });
-  if (get('pushOn') && pushSupported() && Notification.permission === 'granted') pushSend().then((ok) => ok || enablePush().then(() => renderNotify())).catch(() => {});
+  if (m.me.uid && get('pushOn') && pushSupported() && Notification.permission === 'granted') pushSend().then((ok) => ok || enablePush().then(() => renderNotify())).catch(() => {});
 }
 // 화면을 보고 있는지 서버에 알린다: 보고 있으면 푸시 대신 앱 안에서 알려 주면 되기 때문
 document.addEventListener('visibilitychange', () => joined && send({ t: 'vis', v: !document.hidden }));
