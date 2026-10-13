@@ -17,7 +17,7 @@ const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15
 
 (async () => {
   const state = path.join(os.tmpdir(), `presence-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), AWAY_MS: '1500' }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio',
     '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { stdio: 'ignore' });
@@ -93,7 +93,22 @@ const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15
     check(await until(A, `document.querySelectorAll('#voiceBar .vp').length === 1`), '나가면 바에서 사라짐');
     await A.js(`document.querySelector('#voiceBtn').click()`);
     check(await until(C, `document.querySelector('#voiceBar').hidden`), '모두 나가면 바가 다시 숨겨짐');
+    console.log('폰 화면이 꺼졌을 때(전원 버튼)');
+    await A.js(`document.querySelector('#tab-users').click()`);
+    const rowOf = (name) => `[...document.querySelectorAll('#users li')].find((l) => l.querySelector('.nm').textContent.startsWith('${name}'))`;
+    await B.js(`window.__attempt = attempt; attempt = () => {}`); // 꺼진 화면은 다시 연결하지 못한다
+    await B.js(`dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false }))`); // 화면이 꺼질 때 오는 이벤트
+    await wait(800);
+    check(await A.js(`!!(${rowOf('폰')})`), '화면이 꺼져도(pagehide) 폰은 바로 나가지 않고 참가자 목록에 남아 있음');
+    await B.js(`dropSocket('screen-off')`); // 연결이 끊김
+    check(await until(A, `(() => { const li = ${rowOf('폰')}; return !!li && [...li.querySelectorAll('.tag')].some((t) => t.textContent === '자리 비움'); })()`, 6000), '연결이 끊긴 폰은 참가자 목록에 "자리 비움" 글자와 함께 남음');
+    check(await A.js(`![...document.querySelectorAll('.sys')].some((x) => x.textContent.includes('폰 님이 나갔어요'))`), '그 사이 "나갔어요" 알림은 없음');
+    check(await A.js(`(() => { const li = ${rowOf('폰')}; const a = li.querySelector('.av'); return getComputedStyle(a).opacity < 1; })()`), '자리 비움은 아바타가 흐려져 한눈에 구분됨');
+    await B.js(`attempt = window.__attempt; scheduleAttempt(0)`); // 화면을 켜고 돌아옴
+    check(await until(B, `joined && !reconnecting && ws.readyState === 1`, 8000), '화면을 켜면 같은 자리로 다시 연결됨');
+    check(await until(A, `(() => { const li = ${rowOf('폰')}; return !!li && ![...li.querySelectorAll('.tag')].some((t) => t.textContent === '자리 비움'); })()`, 6000), '돌아오면 "자리 비움"이 사라짐');
+    check(await A.js(`[...document.querySelectorAll('.sys')].filter((x) => x.textContent.includes('폰 님이 들어왔어요')).length === 1 && ![...document.querySelectorAll('.sys')].some((x) => x.textContent.includes('폰 님이 나갔어요'))`), '돌아와도 "들어왔어요"가 또 찍히거나 "나갔어요"가 찍히지 않음 (처음 입장 때 한 번뿐)');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

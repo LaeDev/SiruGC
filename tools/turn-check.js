@@ -105,6 +105,6 @@ const mask = (s) => (s ? s.slice(0, 3) + '***(' + s.length + '자)' : '(없음)'
       check(/중계 서버 경유/.test(share), `화면에 "중계 서버 경유" 표시가 뜸 ("${share}")`);
     }
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e.message); process.exit(1); });

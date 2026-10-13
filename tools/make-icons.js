@@ -87,6 +87,6 @@ const DRAW = `(() => {
       console.log(name.padEnd(24), buf.length, 'bytes');
     }
     cdp.close();
-  } finally { chrome.kill(); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  }
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

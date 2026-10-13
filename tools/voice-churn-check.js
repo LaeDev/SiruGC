@@ -101,6 +101,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     h = await hear();
     check(h.every((v) => v.every((x) => x > 3)), `복구 뒤 모두가 서로의 소리를 들음 (세기 ${h.map((v) => v.map((x) => x.toFixed(0)).join('/')).join(' | ')})`);
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

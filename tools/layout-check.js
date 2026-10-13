@@ -133,6 +133,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     await M.js(`document.querySelector('#resizer').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`); await wait(150);
     check(await M.js(`!localStorage.videoH && !document.documentElement.classList.contains('video-h')`), '두 번 누르면 원래 높이로 돌아감');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

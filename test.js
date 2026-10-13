@@ -21,8 +21,8 @@ const sinkServer = http.createServer((req, res) => {
   req.on('end', () => { sink.hits.push(JSON.parse(body)); res.writeHead(sink.status).end(); });
 });
 
-function client(cid, name, extra = {}) {
-  const ws = new WebSocket(`ws://localhost:${PORT}`);
+function client(cid, name, extra = {}, { host = 'localhost', headers } = {}) {
+  const ws = new WebSocket(`ws://${host}:${PORT}`, { headers });
   const c = { ws, msgs: [], closed: false };
   ws.on('message', (d) => c.msgs.push(JSON.parse(d)));
   ws.on('close', () => (c.closed = true));
@@ -304,6 +304,114 @@ async function dmFullCheck() {
   await wait(400);
 }
 
+// 닉네임은 겹칠 수 없고, IP나 닉네임이 같다고 같은 사람으로 합쳐지지 않는다(예전 '같은 IP Sync'는 남의 쪽지를 읽는 구멍이라 없앴다).
+// 서로 다른 IP는 127.0.0.1 과 ::1 로 만든다
+async function nameCheck() {
+  const A = '127.0.0.1', B = '[::1]';
+  const a = client('nm-cid-a000001', '닉네임', { avatar: AVATAR, color: '#112233' }, { host: A }); await a.open; await wait(250);
+  const aj = a.find('joined'); assert(aj, '처음 쓰는 닉네임은 그냥 들어감');
+  const b = client('nm-cid-b000001', ' 닉  네임 ', {}, { host: B }); await b.open; await wait(350);
+  assert(b.find('name-taken')?.name && !b.find('joined'), '다른 IP에서 같은 닉네임(공백 차이)은 들어올 수 없음');
+  await until(() => b.closed, '거부된 연결은 닫힘', 1500);
+  const b2 = client('nm-cid-b000002', 'NICK', {}, { host: B }); await b2.open; await wait(200);
+  const b3 = client('nm-cid-b000003', 'nick', {}, { host: A }); await b3.open; await wait(350);
+  assert(b2.find('joined') && b3.find('name-taken'), '대소문자만 다른 닉네임도 같은 이름으로 봄');
+  const dots = client('nm-cid-d000001', 'n.i_c-k', {}, { host: A }); await dots.open; await wait(350);
+  assert(dots.find('name-taken') && !dots.find('joined'), '_ - . 만 끼운 닉네임도 같은 이름으로 봄');
+  const p = client('nm-cid-p000001', '닉네임', {}, { host: A, headers: { 'X-Forwarded-For': '9.9.9.9' } }); await p.open; await wait(350);
+  assert(p.find('name-taken') && !p.find('joined'), '프록시 헤더가 있어도 같은 닉네임은 들어올 수 없음');
+  // 핵심: 같은 IP, 같은 닉네임이라도 내 쪽지·프로필을 가져갈 수 없다
+  const c = client('nm-cid-c000001', '닉네임', { avatar: '', color: '#ffffff' }, { host: A }); await c.open; await wait(350);
+  assert(c.find('name-taken') && !c.find('joined') && !c.find('inbox'), '같은 IP의 같은 닉네임도 들어올 수 없음 (같은 사람으로 합쳐지지 않음)');
+  const d = client('nm-cid-d000009', '보내는이'); await d.open; await wait(200);
+  a.clear(); c.clear(); d.send({ t: 'dm', to: aj.me.uid, text: '나에게만 와야 함' }); await wait(400);
+  assert(a.find('dm') && !c.find('dm'), '쪽지는 그 닉네임을 쓰려던 다른 사람에게 가지 않음');
+  const a2 = client('nm-cid-a000001', '닉네임', {}, { host: A }); await a2.open; await wait(300);
+  assert(a2.find('joined') && !a2.find('name-taken'), '같은 기기(탭 두 개)는 그대로 들어올 수 있음');
+  // 쓸 수 없는 글자: 보이지 않는 문자, 전각, 이모티콘, 태그, 한글 채움 문자
+  for (const bad of ['시\u200B루', 'ＮＩＣＫ', '😎멋쟁이', '<b>x</b>', 'ㅤ', '   ', '_ _']) {
+    const x = client('nm-cid-x' + Math.random().toString(16).slice(2, 9), bad, {}, { host: A }); await x.open; await wait(250);
+    assert(x.find('name-invalid') && !x.find('joined'), '쓸 수 없는 닉네임은 거절됨: ' + JSON.stringify(bad));
+  }
+  // 객체가 아닌 JSON 프레임 한 줄로 서버가 죽지 않는다 (입장 전·후 모두)
+  const raw = client('nm-cid-r000001', '프레임'); await raw.open; await wait(250);
+  const pre = new WebSocket(`ws://localhost:${PORT}`); await new Promise((r) => pre.on('open', r));
+  for (const f of ['null', '5', '"x"', '[]', 'true']) { pre.send(f); raw.ws.send(f); }
+  await wait(300);
+  const alive = client('nm-cid-z000001', '살아있나'); await alive.open; await wait(300);
+  assert(alive.find('joined') && !raw.closed, '이상한 JSON 프레임을 보내도 서버가 계속 동작함');
+  pre.close();
+  for (const x of [a, a2, b2, d, raw, alive]) x.send({ t: 'bye' });
+  await wait(400);
+}
+
+// 입장 화면에서 '쪽지함'으로 들어온 사람: 방에는 보이지도 들어가지도 않고, 쪽지만 주고받는다
+async function dmOnlyCheck() {
+  const room = client('do-room-0000001', '방사람'); await room.open; await wait(250);
+  const rj = room.find('joined');
+  const d = client('do-dm-00000001', '쪽지러', { dmOnly: true, device: 'pc' }, { host: '127.0.0.1' }); await d.open; await wait(300);
+  const dj = d.find('joined');
+  assert(dj?.dmOnly === true && !dj.me.host && dj.users.length === 0 && !dj.ice, '쪽지만 쓰는 연결은 방 정보(참가자·영상·음성 서버)를 받지 않음');
+  assert(!room.find('user-join'), '방 사람들에게 입장 알림이 가지 않음');
+  room.send({ t: 'chat', text: '방 안의 말' }); await wait(300);
+  assert(!d.find('chat'), '방 채팅은 쪽지만 쓰는 사람에게 가지 않음');
+  d.clear(); room.clear();
+  d.send({ t: 'chat', text: '몰래 채팅' }); d.send({ t: 'voice-join' }); d.send({ t: 'queue-add', videoId: V1 }); d.send({ t: 'share-start' }); d.send({ t: 'ban', id: rj.me.id, mode: 'kick' }); await wait(400);
+  assert(!room.find('chat') && !room.find('voice') && !room.find('queue') && !room.find('share-start') && !room.closed, '쪽지만 쓰는 사람은 채팅·음성·대기열·공유·강퇴를 할 수 없음');
+  d.send({ t: 'dm-members' }); await wait(250);
+  assert(d.find('members')?.list.some((p) => p.uid === rj.me.uid && p.online), '쪽지 상대 목록에서 방 사람을 찾을 수 있음');
+  d.send({ t: 'dm', to: rj.me.uid, text: '방 밖에서 보낸 쪽지' }); await wait(350);
+  assert(room.find('dm')?.msg.text === '방 밖에서 보낸 쪽지', '방에 들어가지 않고도 쪽지를 보낼 수 있음');
+  room.clear(); d.clear();
+  room.send({ t: 'dm', to: dj.me.uid, text: '답장' }); await wait(350);
+  assert(d.find('dm')?.msg.text === '답장', '방 사람의 답장이 쪽지만 쓰는 사람에게 도착함');
+  const late = client('do-late-0000001', '늦게온이'); await late.open; await wait(250);
+  assert(!late.find('joined').users.some((u) => u.uid === dj.me.uid), '나중에 방에 들어온 사람의 참가자 목록에도 보이지 않음');
+  const same = client('do-same-0000001', '쪽지러', {}, { host: '[::1]' }); await same.open; await wait(300);
+  assert(same.find('name-taken') && !same.find('joined'), '다른 IP에서는 쪽지만 쓰는 사람의 닉네임도 쓸 수 없음');
+  const twin = client('do-twin-0000001', '쪽지러', {}, { host: '127.0.0.1' }); await twin.open; await wait(300);
+  assert(twin.find('name-taken') && !twin.find('joined'), '같은 IP에서도 쪽지만 쓰는 사람의 닉네임을 쓸 수 없음 (같은 사람으로 합쳐지지 않음)');
+  room.clear(); d.ws.terminate(); await wait(2200); // 폰이 아니라서 유예 1.5초
+  assert(!room.find('user-leave') && !room.find('user-away'), '쪽지만 쓰는 사람이 나가도 방에는 아무 알림이 가지 않음');
+  const d2 = client('do-dm-00000002', '쪽지러셋', { dmOnly: true, hostKey: hostKeyForTests }); await d2.open; await wait(300);
+  assert(!d2.find('joined').me.host && !d2.find('joined').hostKey, '호스트 키를 가져와도 쪽지만 쓰는 연결은 호스트가 아님');
+  for (const x of [room, late, d2]) x.send({ t: 'bye' });
+  await wait(400);
+}
+
+// 폰·태블릿은 화면이 꺼져도 PC보다 훨씬 오래 방에 남는다 (알림 확인하고 돌아올 시간). PC 1.5초, 폰 4.5초로 줄여서 시험
+async function graceCheck() {
+  const obs = client('gr-obs-0000001', '지켜보는이'); await obs.open; await wait();
+  const m = client('gr-mob-0000001', '폰사람', { device: 'mobile' }); await m.open; await wait();
+  const p = client('gr-pc-00000001', '피씨사람', { device: 'pc' }); await p.open; await wait(200);
+  const mj = m.find('joined'), pj = p.find('joined');
+  m.send({ t: 'voice-join' }); await wait(200); obs.clear();
+  m.ws.terminate(); p.ws.terminate(); // 둘 다 갑자기 끊김 (폰은 화면이 꺼짐)
+  await until(() => obs.find('user-leave')?.id === pj.me.id, 'PC는 1.5초 유예 뒤에 나감', 3000);
+  assert(!obs.msgs.some((x) => x.t === 'user-leave' && x.id === mj.me.id), '같은 시각에 폰은 아직 방에 남아 있음');
+  assert(obs.msgs.some((x) => x.t === 'user-away' && x.id === mj.me.id && x.away === true), '오래 끊긴 폰은 다른 사람에게 "자리 비움"으로 알려짐');
+  await until(() => obs.last('voice') && !obs.last('voice').list.some((v) => v.id === mj.me.id), '끊긴 폰의 음성은 1.5초 뒤에 정리됨', 2500);
+  assert(!obs.msgs.some((x) => x.t === 'user-leave' && x.id === mj.me.id), '음성이 정리돼도 방에는 계속 남아 있음');
+  await wait(1500); // 합쳐서 약 3.5초: 폰 유예(4.5초) 안
+  const m2 = client('gr-mob-0000001', '폰사람', { device: 'mobile', resume: { id: mj.me.id, secret: mj.resume } }); await m2.open; await wait(300);
+  const rj = m2.find('joined');
+  assert(rj.resumed === true && rj.me.id === mj.me.id, '화면을 켜고 돌아오면 같은 자리를 이어받음');
+  assert(!rj.voice.some((v) => v.id === mj.me.id), '오래 끊겨 있던 동안 정리된 음성은 돌아온 뒤에도 꺼져 있음 (화면이 이 상태에 맞춘다)');
+  await until(() => obs.last('user-away')?.id === mj.me.id && obs.last('user-away').away === false, '돌아오면 "자리 비움"이 풀림', 1500);
+  await wait(5000);
+  assert(!obs.msgs.some((x) => x.t === 'user-leave' && x.id === mj.me.id), '돌아온 뒤에는 유예 시간이 지나도 내보내지 않음');
+
+  // 앱이 완전히 닫혔다가(비밀 값 없음) 알림을 눌러 다시 열려도 같은 자리를 쓴다: 유령이 둘로 보이지 않는다
+  m2.ws.terminate(); await wait(800); obs.clear();
+  const m3 = client('gr-mob-0000001', '폰사람', { device: 'mobile' }); await m3.open; await wait(400);
+  const j3 = m3.find('joined');
+  assert(j3.me.id === mj.me.id && !j3.resumed, '비밀 값 없이 다시 열어도 끊겨 있던 같은 기기의 자리를 그대로 씀');
+  assert(!obs.find('user-leave') && obs.find('user-join')?.back === true, '다른 사람에게는 나갔다 들어온 새 사람이 아니라 돌아온 것으로 보임');
+  await wait(5200);
+  assert(!obs.find('user-leave'), '이전 유령 타이머가 남아 새 자리를 내보내지 않음');
+  for (const x of [obs, m3]) x.send({ t: 'bye' }); await wait(300);
+}
+
 // 끊겼다가 돌아오면 같은 세션을 이어받는다 (폰이 와이파이↔데이터를 갈아타거나 절전에서 깨어날 때)
 async function resumeCheck() {
   const obs = client('obs-cid-00000001', '관찰자'); await obs.open; await wait();
@@ -323,12 +431,14 @@ async function resumeCheck() {
   await wait(1800);
   assert(!obs.find('user-leave') && !obs.find('user-join'), '이어받은 뒤에는 나갔다 들어온 알림이 전혀 없음 (깜빡임 없음)');
 
-  // 비밀 값이 틀리면 이어받지 못하고 새로 입장한다 (남의 세션을 가로채지 못함)
+  // 비밀 값이 틀리면 이어받기(resumed)로 처리되지 않고 새 입장이다. 같은 기기(cid)면 끊겨 있던 자리를 그대로 쓰고, 남의 기기면 새 자리다(아래 '도둑')
   x2.ws.terminate(); await wait(300); obs.clear();
   const bad = client('xx-cid-000000001', '엑스', { resume: { id: xj.me.id, secret: 'wrong-secret-0000' } }); await bad.open; await wait(300);
-  assert(!bad.find('joined').resumed && bad.find('joined').me.id !== xj.me.id, '틀린 비밀 값은 새 세션으로 입장');
-  assert.equal(obs.find('user-leave')?.id, undefined, '옛 세션은 아직 유예 중');
-  await until(() => obs.find('user-leave')?.id === xj.me.id, '유예 시간이 지나면 옛 세션이 정리됨', 4000);
+  assert(!bad.find('joined').resumed, '틀린 비밀 값은 이어받기로 처리되지 않음');
+  assert.equal(bad.find('joined').me.id, xj.me.id, '같은 기기라면 끊겨 있던 자리를 그대로 씀 (유령이 둘로 보이지 않음)');
+  assert(!obs.find('user-leave'), '그동안 나갔다 들어온 알림은 없음');
+  bad.send({ t: 'bye' });
+  await until(() => obs.find('user-leave')?.id === xj.me.id, '나가기 신호를 보내면 바로 나감', 1000);
 
   // 서버가 아직 끊긴 걸 모르는 소켓(와이파이↔데이터 전환: 폰은 끊김을 아는데 서버는 모름)도 새 연결이 넘겨받는다. 중복 참가자가 생기지 않는다
   assert(/^[0-9a-z]{6,}$/.test(xj.build || ''), '입장 응답에 화면 버전 번호가 들어 있음');
@@ -503,6 +613,6 @@ async function configCheck() {
 }
 
 sinkServer.listen(PORT + 300, '127.0.0.1');
-const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
-wait(1000).then(main).then(dmFullCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
+const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', RESUME_GRACE_MOBILE_MS: '4500', AWAY_MS: '500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
+wait(1000).then(main).then(dmFullCheck).then(nameCheck).then(dmOnlyCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
   .finally(() => { sinkServer.close(); srv.kill(); fs.rmSync(STATE, { force: true }); process.exit(); });

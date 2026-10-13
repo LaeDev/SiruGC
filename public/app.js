@@ -17,6 +17,7 @@ function deviceKind() {
 }
 const icon = (id) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'i'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = `<use href="#${id}"/>`; return s; };
 
+let wantDm = false, dmOnly = false; // 입장 화면에서 '쪽지함' 버튼을 눌렀는지 / 서버가 그렇게 받아 주었는지
 let ws, me, isHost = false, sharerId = null, users = [], ended = false, joined = false, openUser = null;
 // 의미색 버튼: go(초록) / blue(파랑) / stop(빨강) 중 하나만 켠다
 const setTone = (b, tone) => ['go', 'blue', 'stop'].forEach((c) => b.classList.toggle(c, c === tone));
@@ -124,16 +125,26 @@ $('#photoFile').onchange = async (e) => {
 /* ================= 입장 / 연결 ================= */
 $('#nameIn').value = get('name') || '';
 refresh();
+// 입장 버튼은 둘: '입장하기'(방)와 '쪽지함'(방에 들어가지 않고 쪽지만). 어느 쪽을 눌렀는지는 wantDm에 담는다
+const setJoinBusy = (on) => { $('#enter').disabled = $('#inboxBtn').disabled = on; if (!on) { $('#enter').textContent = '입장하기'; $('#inboxBtn').lastChild.textContent = '쪽지함'; } else (wantDm ? $('#inboxBtn').lastChild : $('#enter')).textContent = '들어가는 중'; };
+$('#enter').onclick = () => { wantDm = false; };
+$('#inboxBtn').onclick = () => { wantDm = true; $('#joinForm').requestSubmit(); };
 
+// 서버의 닉네임 규칙과 같다 (서버가 최종 판단)
+const NICK_RE = /^[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9 _.\-]+$/, NICK_LETTER = /[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9]/;
+const NAME_HELP = '닉네임에는 한글, 영문, 숫자, 공백, _ - . 만 쓸 수 있어요.';
 $('#joinForm').onsubmit = (e) => {
   e.preventDefault();
-  const name = $('#nameIn').value.trim();
+  const name = $('#nameIn').value.replace(/\s+/g, ' ').trim();
   if (!name) { $('#joinMsg').textContent = '닉네임을 입력해 주세요.'; return $('#nameIn').focus(); }
+  if (!NICK_RE.test(name) || !NICK_LETTER.test(name)) { $('#joinMsg').textContent = NAME_HELP; return $('#nameIn').focus(); }
   $('#joinMsg').textContent = '';
   set('name', name);
-  $('#enter').disabled = true; $('#enter').textContent = '들어가는 중';
+  setJoinBusy(true);
   connect(name);
 };
+// 쪽지함에서 방에 들어가기: 화면을 새로 열고 같은 닉네임으로 바로 입장한다
+$('#toRoom').onclick = () => { try { sessionStorage.setItem('autoJoin', '1'); } catch {} location.reload(); };
 
 // 서버의 도배 방지(채팅 0.3초, 쪽지 0.4초 간격)에 걸리면 메시지가 말없이 사라진다. 연달아 보내는 글(첨부 포함)은 간격을 두고 차례로 보낸다.
 const paceAt = { chat: 0, dm: 0 };
@@ -147,7 +158,7 @@ function sendPaced(kind, msg) {
   return true;
 }
 // 연결이 끊겨도 서버가 살아 있으면 화면을 그대로 두고 조용히 다시 연결한다. 서버가 응답하지 않을 때만 '서버가 꺼졌습니다'를 보여 준다.
-let joinName = '', resumeInfo = null, reconnecting = false, firstJoined = false, downSince = 0, probeFails = 0, retryN = 0, attemptTimer = 0, hbTimer = 0, lastHeard = 0, pingAt = 0, tickAt = 0, netTimer = 0;
+let nameTaken = '', nameBad = false, joinName = '', resumeInfo = null, reconnecting = false, firstJoined = false, downSince = 0, probeFails = 0, retryN = 0, attemptTimer = 0, hbTimer = 0, lastHeard = 0, pingAt = 0, tickAt = 0, netTimer = 0;
 const BUILD = document.querySelector('meta[name=build]')?.content || ''; // 이 화면이 받은 파일의 버전 (서버가 index.html에 심어 준다)
 { const v = $('#verNote'); if (v) v.textContent = '화면 버전 ' + (BUILD || '알 수 없음') + ' · 기능이 안 보이면 새로고침(앱이면 완전히 닫았다 다시 열기)'; }
 const showNet = (t) => { const n = $('#net'); n.textContent = t; n.hidden = false; };
@@ -165,14 +176,17 @@ function connect(name) {
   if (prev) { prev.onopen = prev.onmessage = prev.onclose = null; try { prev.close(4000, 'replaced'); } catch {} }
   const sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
   ws = sock;
-  sock.onopen = () => send({ t: 'join', name, avatar: currentAvatar(), color: profile.color, device: deviceKind(), cid, hostKey: get('hostKey'), resume: resumeInfo });
+  sock.onopen = () => send({ t: 'join', name, avatar: currentAvatar(), color: profile.color, device: deviceKind(), dmOnly: wantDm || undefined, cid, hostKey: get('hostKey'), resume: resumeInfo });
   sock.onmessage = (e) => { lastHeard = Date.now(); handle(JSON.parse(e.data)); };
   sock.onclose = () => {
     if (ws !== sock || ended) return; // 이미 새 연결로 바뀐 옛 소켓의 이벤트는 무시
     clearInterval(hbTimer);
+    if (joined && nameTaken) return location.reload(); // 끊긴 사이에 내 닉네임을 다른 사람이 가져갔다: 입장 화면으로 돌아가 다시 정한다
     if (joined) return reconnectSoon();
-    $('#enter').disabled = false; $('#enter').textContent = '입장하기';
-    $('#joinMsg').textContent = '서버에 연결하지 못했어요. 잠시 뒤 다시 눌러 주세요.';
+    setJoinBusy(false);
+    $('#joinMsg').textContent = nameBad ? NAME_HELP : nameTaken ? `"${nameTaken}" 닉네임은 지금 방에 있는 다른 사람이 쓰고 있어요. 다른 닉네임으로 들어와 주세요.` : '서버에 연결하지 못했어요. 잠시 뒤 다시 눌러 주세요.';
+    if (nameTaken || nameBad) $('#nameIn').focus();
+    nameTaken = ''; nameBad = false;
   };
 }
 
@@ -227,7 +241,8 @@ async function attempt() {
   scheduleAttempt(8000); // 8초 안에 입장 응답(joined)이 안 오면 다시 시도. joined가 오면 이 타이머를 지운다
 }
 // 탭을 정말 닫을 때는 '나갑니다'를 알려 유예(끊긴 사람을 잠깐 남겨 두는 시간) 없이 바로 나간다. 폰이 백그라운드로 가는 것(persisted)은 제외
-addEventListener('pagehide', (e) => { if (!e.persisted && joined && !ended) send({ t: 'bye' }); });
+// 폰·태블릿은 제외: 화면을 끄거나 앱을 바꿀 때도 이 이벤트가 오는데, 그때는 서버가 유예 시간 동안 자리를 남겨 두어야 알림을 확인하고 돌아올 수 있다
+addEventListener('pagehide', (e) => { if (!e.persisted && joined && !ended && deviceKind() === 'pc') send({ t: 'bye' }); });
 // 폰이 절전에서 깨어나거나 인터넷이 돌아오면 기다리지 않고 바로 확인한다
 addEventListener('online', () => probe('online'));
 addEventListener('pageshow', (e) => e.persisted && probe('pageshow'));
@@ -254,6 +269,9 @@ function applyResume(m, wasReconnecting) {
   queue = m.queue || []; renderQueue();
   if (m.yt) applyYt(m.yt);
   sharerId = m.sharer || null;
+  // 오래 끊겨 있는 동안 서버가 내 음성·공유를 정리했으면 이쪽도 맞춘다 (마이크가 켜진 채 방에는 없는 상태가 되지 않게)
+  if (inVoice() && !voiceList.some((v) => v.id === me)) { leaveVoice(); sys('오래 끊겨 있어서 음성에서 나갔어요. 필요하면 다시 참가해 주세요.'); }
+  if (localStream && sharerId !== me) { stopLocal(); sys('오래 끊겨 있어서 화면 공유가 멈췄어요.'); }
   if (sharerId && sharerId !== me && !pcs.has(sharerId)) requestShare();
   renderStage(); dmResync(m);
   send({ t: 'vis', v: !document.hidden });
@@ -301,6 +319,8 @@ Object.assign(handlers, {
     joined = true;
     me = m.me.id; isHost = m.me.host; users = m.users.concat(m.me);
     if (m.hostKey) set('hostKey', m.hostKey);
+    dmOnly = !!m.dmOnly; // 서버가 쪽지만 쓰는 연결로 받아 줬을 때만 (옛 서버라면 방으로 들어온 것이니 방 화면 그대로)
+    document.body.classList.toggle('dm-only', dmOnly); $('#toRoom').hidden = !dmOnly;
     $('#join').hidden = true; $('#app').hidden = false;
     $('#banBox').hidden = !isHost;
     renderBans(m.bans); renderUsers();
@@ -310,11 +330,20 @@ Object.assign(handlers, {
     if (m.yt) applyYt(m.yt);
     if (m.sharer) { sharerId = m.sharer; requestShare(); }
     renderStage();
+    if (dmOnly) { $('.logo .t').textContent = '쪽지함'; showTab('dm'); return; } // 방 안내와 채팅 입력 칸은 쓰지 않는다
     sys(isHost ? '이 방의 호스트예요. 참가자 탭에서 사람을 누르면 쪽지·강퇴·밴 메뉴가 열려요.' : '입장했어요. 참가자 탭에서 사람을 누르면 쪽지를 보낼 수 있어요.');
     if (matchMedia('(pointer:fine)').matches) $('#chatIn').focus(); // 터치 기기에선 키보드가 갑자기 올라오지 않게
   },
+  'name-invalid'() { nameBad = true; }, // 서버가 닉네임 규칙에 안 맞다고 거절 (곧 연결을 닫는다)
+  'name-taken'(m) { nameTaken = m.name; }, // 곧 서버가 연결을 닫는다. 닫힘 처리에서 안내를 보여 준다
   queue(m) { queue = m.queue; renderQueue(); },
-  'user-join'(m) { users.push(m.user); renderUsers(); dmRefresh(); sys(m.user.name + ' 님이 들어왔어요.'); },
+  'user-join'(m) {
+    const at = users.findIndex((x) => x.id === m.user.id); // 끊겨 있던 자리로 돌아온 경우: 새 사람이 아니라 갱신
+    if (at >= 0) users[at] = m.user; else users.push(m.user);
+    renderUsers(); dmRefresh();
+    if (at < 0) sys(m.user.name + ' 님이 들어왔어요.');
+  },
+  'user-away'(m) { const u = users.find((x) => x.id === m.id); if (u) { u.away = m.away; renderUsers(); } },
   'user-leave'(m) {
     const u = users.find((x) => x.id === m.id);
     users = users.filter((x) => x.id !== m.id); closePc(m.id); closeVpc(m.id);
@@ -358,6 +387,7 @@ function renderUsers() {
     const canBan = isHost && !u.host;                         // 호스트만 강퇴·밴
     const row = el(canOpen ? 'button' : 'div', { className: 'urow' });
     row.append(avEl(u), el('span', { className: 'nm', textContent: u.name + (u.id === me ? ' (나)' : '') }));
+    if (u.away) { row.classList.add('away'); row.append(el('span', { className: 'tag soft', title: '연결이 끊겼어요. 돌아오면 그대로 이어져요', textContent: '자리 비움' })); }
     if (DEVICE_LABEL[u.device]) { const dv = el('span', { className: 'tag soft dev' }, icon(DEVICE_ICON[u.device]), DEVICE_LABEL[u.device]); row.append(dv); }
     if (u.host) row.append(tag('호스트'));
     if (u.id === sharerId) row.append(tag('공유 중', true));
@@ -440,12 +470,14 @@ TABS.forEach((n, i) => {
   $('#tab-' + n).onclick = () => showTab(n);
   $('#tab-' + n).onkeydown = (e) => { // 좌우 방향키로 탭 이동
     const d = { ArrowRight: 1, ArrowLeft: -1 }[e.key];
-    if (!d) return;
+    if (!d || dmOnly) return;
     const next = TABS[(i + d + TABS.length) % TABS.length];
     showTab(next); $('#tab-' + next).focus();
   };
 });
 
 // 앱이 뜰 때 서버가 살아 있는지 확인: 꺼져 있으면(5xx, 연결 실패) 서비스 워커가 보여 준 앱 껍데기 위에 안내 페이지를 띄운다
+// 쪽지함에서 '방에 들어가기'로 새로 열린 화면이면 바로 입장한다 (모든 스크립트가 올라온 뒤에)
+addEventListener('load', () => { try { if (sessionStorage.getItem('autoJoin') && get('name')) { sessionStorage.removeItem('autoJoin'); $('#joinForm').requestSubmit(); } } catch {} });
 fetch('/healthz', { cache: 'no-store' }).then((r) => { if (!r.ok) showServerDown(); }).catch(() => showServerDown());
 $('#nameIn').focus();

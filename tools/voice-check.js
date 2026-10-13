@@ -118,6 +118,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     await B.js(`document.querySelector('#soundBtn').click()`);
     check(Math.abs((await gainOf()) - 0.7) < 0.01, '소리를 다시 켜면 사람별 크기(70%)로 돌아옴');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

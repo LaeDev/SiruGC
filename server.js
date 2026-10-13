@@ -20,7 +20,13 @@ try {
 const PORT = process.env.PORT || 3000;
 // 연결이 끊긴 사람을 이 시간 동안은 방에 남겨 둔다. 그 안에 돌아오면 같은 세션을 이어받아서(음성·화면 공유·방 상태 유지)
 // 나갔다 들어오는 깜빡임이 없다. 폰은 화면이 꺼지거나 와이파이↔데이터를 갈아탈 때 잠깐씩 끊기기 때문이다.
-const GRACE_MS = Number(process.env.RESUME_GRACE_MS) || 60000; // 폰 화면이 꺼졌다 켜지는 시간까지 버티도록 1분
+const GRACE_MS = Number(process.env.RESUME_GRACE_MS) || 60000; // PC: 새로고침·와이파이 전환 정도를 버티는 1분
+// 폰·태블릿은 화면이 꺼지면(전원 버튼, 절전) 앱이 멈춰서 연결이 끊긴다. 알림이나 다른 앱을 확인하고 돌아올 시간을 주려고 훨씬 오래 방에 남겨 둔다.
+// 테스트처럼 RESUME_GRACE_MS만 지정했으면 폰도 같은 값을 쓴다.
+const GRACE_MOBILE_MS = Number(process.env.RESUME_GRACE_MOBILE_MS) || (process.env.RESUME_GRACE_MS ? GRACE_MS : 10 * 60 * 1000);
+const LIVE_HOLD_MS = GRACE_MS; // 끊긴 사람의 음성·화면 공유는 이만큼만 붙잡는다 (소리 없는 연결을 남들이 계속 붙잡고 있지 않게)
+const AWAY_MS = Number(process.env.AWAY_MS) || 8000; // 이 시간 넘게 끊겨 있으면 다른 사람 화면에 '자리 비움'으로 보인다 (잠깐 깜빡임은 알리지 않음)
+const graceOf = (ws) => (ws.device === 'mobile' || ws.device === 'tablet' ? GRACE_MOBILE_MS : GRACE_MS);
 const TRUST_PROXY = !!process.env.TRUST_PROXY; // 리버스 프록시 뒤에서만 켤 것 (X-Forwarded-For 신뢰)
 const DB = process.env.STATE_FILE || path.join(__dirname, 'state.json');
 const PUB = path.join(__dirname, 'public');
@@ -93,13 +99,22 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
 const send = (ws, msg) => ws.readyState === 1 && ws.send(JSON.stringify(msg));
-const broadcast = (msg, except) => room.clients.forEach((c) => c !== except && send(c, msg));
+// dmOnly: 입장 화면에서 '쪽지만 쓰기'를 고른 연결. 방 사람들에게 보이지 않고 방 소식(채팅·영상·음성)도 받지 않으며 쪽지만 주고받는다. 서버 종료 알림만 예외
+const broadcast = (msg, except) => room.clients.forEach((c) => c !== except && (!c.dmOnly || msg.t === 'shutdown') && send(c, msg));
+const roomCount = () => [...room.clients.values()].filter((c) => !c.dmOnly).length;
 const DEVICES = new Set(['pc', 'tablet', 'mobile']); // 참가자 목록에 보이는 기기 종류. 그 밖의 값은 버린다
 const cleanDevice = (d) => (DEVICES.has(d) ? d : null);
-const userOf = (c) => ({ id: c.id, uid: c.uid, name: c.name, avatar: c.avatar, color: c.color, host: c.host, device: c.device || null });
+const userOf = (c) => ({ id: c.id, uid: c.uid, name: c.name, avatar: c.avatar, color: c.color, host: c.host, device: c.device || null, away: !!c.away });
 const banList = () => room.bans.map(({ id, type, label }) => ({ id, type, label })); // IP 값은 노출하지 않음
 const sendBans = () => room.clients.forEach((c) => c.host && send(c, { t: 'bans', bans: banList() }));
 const isBanned = (ip, cid) => room.bans.some((b) => (b.type === 'ip' ? b.value === ip : b.value === cid));
+// 닉네임: 한글·영문·숫자·공백·_ - . 만 쓸 수 있다 (보이지 않는 문자·전각·비슷하게 생긴 글자로 남을 흉내 내지 못하게). 한글 채움 문자(U+3164) 같은 안 보이는 글자는 범위에서 뺐다
+const NICK_RE = /^[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9 _.\-]+$/;
+const cleanName = (n) => {
+  const s = String(n ?? '').normalize('NFC').replace(/\s+/g, ' ').trim().slice(0, 20).trim();
+  return NICK_RE.test(s) && /[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9]/.test(s) ? s : '';
+};
+const nameKey = (n) => String(n).normalize('NFKC').toLowerCase().replace(/[\s_.\-]+/g, ''); // 대소문자·공백·_ - . 만 다른 이름은 같은 이름으로 본다
 const newId = (n = 4) => crypto.randomBytes(n).toString('hex');
 // 사진/동영상 업로드: 세션마다 발급한 토큰이 있어야 올릴 수 있다
 const uploads = createUploads({ findByToken: (t) => (t ? [...room.clients.values()].find((c) => c.uploadToken === t) : null), send });
@@ -183,22 +198,30 @@ async function queueAdd(ws, videoId) {
   if (!room.yt || room.yt.ended) advance(); else broadcast(queueMsg()); // 기다리는 사이 다른 사람이 틀었을 수 있어 여기서 다시 판단
 }
 
+const clearGhostTimers = (ws) => { clearTimeout(ws.ghostTimer); clearTimeout(ws.holdTimer); clearTimeout(ws.awayTimer); };
+// 오래 끊겨 있는 사람의 음성·화면 공유만 정리한다 (방에는 계속 남아 있음)
+function dropLive(ws) {
+  if (room.clients.get(ws.id) !== ws) return;
+  if (room.sharer === ws.id) { room.sharer = null; broadcast({ t: 'share-stop' }); }
+  if (room.voice.delete(ws.id)) broadcast(voiceMsg());
+}
 function leave(ws) {
   if (room.clients.get(ws.id) !== ws) return; // 이미 다른 소켓이 이 세션을 이어받았으면 무시
   room.clients.delete(ws.id);
-  clearTimeout(ws.ghostTimer);
+  clearGhostTimers(ws);
   if (room.sharer === ws.id) { room.sharer = null; broadcast({ t: 'share-stop' }); }
   if (room.voice.delete(ws.id)) broadcast(voiceMsg());
-  broadcast({ t: 'user-leave', id: ws.id });
-  if (!room.clients.size) room.yt = null; // 아무도 없으면 영상 상태 초기화
+  if (!ws.dmOnly) broadcast({ t: 'user-leave', id: ws.id });
+  if (!roomCount()) room.yt = null; // 방에 아무도 없으면 영상 상태 초기화
 }
 
 // 입장(또는 이어받기) 응답. 입장하는 사람 자신은 users에서 뺀다(클라이언트가 me를 더한다).
 function sendJoined(ws, extra = {}) {
   send(ws, {
     t: 'joined', me: userOf(ws), hostKey: ws.host ? room.hostKey : undefined, resume: ws.resumeSecret, upload: ws.uploadToken,
-    users: [...room.clients.values()].filter((c) => c.id !== ws.id).map(userOf), yt: ytNow(), queue: queueMsg().queue, sharer: room.sharer,
-    voice: voiceMsg().list, ice: iceServers(),
+    users: ws.dmOnly ? [] : [...room.clients.values()].filter((c) => c.id !== ws.id && !c.dmOnly).map(userOf),
+    yt: ws.dmOnly ? null : ytNow(), queue: ws.dmOnly ? [] : queueMsg().queue, sharer: ws.dmOnly ? null : room.sharer,
+    voice: ws.dmOnly ? [] : voiceMsg().list, ice: ws.dmOnly ? undefined : iceServers(), dmOnly: ws.dmOnly || undefined,
     inbox: messages.inboxFor(ws.uid), blocks: messages.blocksOf(ws.uid), vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
     bans: ws.host ? banList() : undefined, build: BUILD, ...extra,
   });
@@ -210,30 +233,42 @@ function join(ws, m, ip) {
   const old = m.resume && typeof m.resume.id === 'string' ? room.clients.get(m.resume.id) : null;
   if (old && old.cid === m.cid && typeof m.resume.secret === 'string' && m.resume.secret === old.resumeSecret) {
     if (!old.host && isBanned(ip, m.cid)) { send(ws, { t: 'banned' }); return ws.close(); }
-    Object.assign(ws, { id: old.id, joined: true, ip, cid: old.cid, uid: old.uid, host: old.host, avatar: old.avatar, color: old.color, name: old.name, device: old.device,
+    Object.assign(ws, { id: old.id, joined: true, ip, cid: old.cid, uid: old.uid, host: old.host, avatar: old.avatar, color: old.color, name: old.name, device: old.device, dmOnly: old.dmOnly,
       visible: true, resumeSecret: old.resumeSecret, uploadToken: old.uploadToken, joinedAt: Date.now() });
     room.clients.set(ws.id, ws); // 옛 소켓 자리를 새 소켓이 차지한다
     if (!old.ghost) old.terminate(); // 아직 살아 있다고 믿던 옛 소켓은 정리 (이 자리는 이미 넘어갔으니 나가기 처리는 건너뛴다)
-    clearTimeout(old.ghostTimer); old.ghost = false;
+    clearGhostTimers(old); old.ghost = false;
+    if (old.away) broadcast({ t: 'user-away', id: ws.id, away: false }, ws);
     return sendJoined(ws, { resumed: true });
   }
-  const created = !room.hostKey; // 맨 처음 들어온 사람이 호스트
+  // 닉네임은 방에 있는 사람(잠깐 끊긴 사람 포함)끼리 겹칠 수 없다. 같은 기기(cid)의 다시 들어오기만 겹쳐도 된다.
+  // IP나 닉네임이 같다는 것만으로는 같은 사람으로 보지 않는다 (예전의 '같은 IP Sync'는 남의 쪽지를 읽을 수 있는 구멍이라 없앴다)
+  const name = cleanName(m.name);
+  if (!name) { send(ws, { t: 'name-invalid' }); return ws.close(); }
+  const key = nameKey(name);
+  if ([...room.clients.values()].some((c) => c !== ws && c.joined && c.cid !== m.cid && nameKey(c.name) === key)) { send(ws, { t: 'name-taken', name }); return ws.close(); }
+  // 이 기기가 끊겨서 방에 남아 있던 자리가 있으면(앱이 닫혔다가 알림을 눌러 다시 열린 경우) 같은 자리를 쓴다. 유령이 둘로 보이지 않게
+  const stale = [...room.clients.values()].find((c) => c.ghost && c.cid === m.cid);
+  if (stale) { dropLive(stale); clearGhostTimers(stale); room.clients.delete(stale.id); }
+  const dmOnly = m.dmOnly === true; // 쪽지만 쓰는 사람은 호스트가 될 수 없고, 방을 연 것으로 치지도 않는다
+  const created = !dmOnly && !room.hostKey; // 맨 처음 방에 들어온 사람이 호스트
   if (created) { room.hostKey = newId(16); save(); }
-  const host = created || (typeof m.hostKey === 'string' && m.hostKey === room.hostKey);
+  const host = !dmOnly && (created || (typeof m.hostKey === 'string' && m.hostKey === room.hostKey));
   // 호스트는 밴 대상에서 제외 (같은 공유기 IP를 쓰는 호스트가 같이 잠기는 것 방지)
   if (!host && isBanned(ip, m.cid)) {
     send(ws, { t: 'banned' });
     return ws.close();
   }
   Object.assign(ws, {
-    id: newId(), joined: true, ip, cid: m.cid, uid: messages.uidOf(m.cid), host, avatar: cleanAvatar(m.avatar), color: cleanColor(m.color), device: cleanDevice(m.device),
-    name: String(m.name || '').trim().slice(0, 20) || '익명', visible: true, resumeSecret: newId(16), uploadToken: newId(16), joinedAt: Date.now(),
+    id: stale ? stale.id : newId(), joined: true, ip, cid: m.cid, uid: messages.uidOf(m.cid), host,
+    avatar: cleanAvatar(m.avatar), color: cleanColor(m.color), device: cleanDevice(m.device),
+    name, dmOnly: dmOnly || undefined, visible: true, resumeSecret: newId(16), uploadToken: newId(16), joinedAt: Date.now(),
   });
   messages.remember(ws);
-  if (!room.yt && room.queue.length) advance(); // 모두 나간 뒤 남은 대기열이 있으면 첫 입장자부터 이어서 재생
+  if (!dmOnly && !room.yt && room.queue.length) advance(); // 모두 나간 뒤 남은 대기열이 있으면 첫 입장자부터 이어서 재생
   sendJoined(ws);
   room.clients.set(ws.id, ws);
-  broadcast({ t: 'user-join', user: userOf(ws) }, ws);
+  if (!dmOnly) broadcast({ t: 'user-join', user: userOf(ws), back: !!stale }, ws);
 }
 
 function ban(ws, m) {
@@ -258,14 +293,20 @@ wss.on('connection', (ws, req) => {
     console.log(`[연결 끊김] ${ws.name} code=${code}${reason?.length ? ` 사유=${String(reason).slice(0, 60)}` : ''} ${Math.round((Date.now() - ws.joinedAt) / 1000)}초 접속`); // 원인 추적용 (1006 = 비정상 끊김, 4000번대 = 화면 쪽이 스스로 끊음 + 사유)
     if (ws.final || closing) return leave(ws);
     ws.ghost = true; ws.visible = false;
-    ws.ghostTimer = setTimeout(() => leave(ws), GRACE_MS);
+    const grace = graceOf(ws);
+    ws.ghostTimer = setTimeout(() => leave(ws), grace);
+    if (grace > LIVE_HOLD_MS) ws.holdTimer = setTimeout(() => dropLive(ws), LIVE_HOLD_MS);
+    if (!ws.dmOnly) ws.awayTimer = setTimeout(() => { ws.away = true; broadcast({ t: 'user-away', id: ws.id, away: true }, ws); }, Math.min(AWAY_MS, grace));
   });
   ws.on('message', (data) => {
     ws.missed = 0; // 무슨 메시지든 왔으면 살아 있는 것
+    ws.lastMsgAt = Date.now();
     let m;
     try { m = JSON.parse(data); } catch { return; }
+    if (!m || typeof m !== 'object') return; // 'null' 같은 프레임을 보내면 m.t에서 예외가 나 서버 전체가 꺼졌었다
     if (m.t === 'join') return !ws.joined && join(ws, m, ip);
     if (!ws.joined) return;
+    if (ws.dmOnly && m.t !== 'bye' && m.t !== 'ping') { messages.handle(ws, m); return; } // 쪽지만 쓰는 연결은 방 기능(채팅·영상·음성·공유·관리)을 쓸 수 없다
     switch (m.t) {
       case 'bye': ws.final = true; leave(ws); ws.close(); break; // 탭을 닫는 등 일부러 나가는 것: 유예 없이 바로 나간다
       case 'ping': send(ws, { t: 'pong' }); break; // 앱이 직접 보내는 생존 신호 (프록시/모바일 절전에서 죽은 연결을 알아내려고)

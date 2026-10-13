@@ -99,6 +99,6 @@ const VIDS = ['dQw4w9WgXcQ', 'jNQXAC9IVRw', 'aqz-KE-bpKQ', '9bZkp7q19f0', 'kJQP7
     const small = await A.js(`[...document.querySelectorAll('#qList .qbtns .btn')].filter((b) => b.getBoundingClientRect().width < 44 || b.getBoundingClientRect().height < 44).length`);
     check(small === 0, '폰에서 모든 조작 버튼이 터치 크기(44px) 이상');
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -128,6 +128,6 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       console.log('  건너뜀: 실제 푸시 구독과 알림 표시(헤드리스 Chrome은 알림 권한을 허용할 수 없음) → 실제 브라우저에서 확인 필요');
     }
     browser.close();
-  } finally { chrome.kill(); srv.kill(); fs.rmSync(state, { force: true }); }
+  } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
