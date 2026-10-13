@@ -5,7 +5,7 @@ rem NOTE: keep this file ASCII-only. cmd mis-parses UTF-8 multibyte text in batc
 rem       so every Korean message lives in start-messages\*.txt and is printed with "type".
 setlocal
 chcp 65001 >nul
-title SiruGC Chat Server
+title Siru GroupChat Server
 cd /d "%~dp0"
 
 where node >nul 2>nul

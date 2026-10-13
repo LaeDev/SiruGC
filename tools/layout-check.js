@@ -107,7 +107,8 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     const M = await page('폰', { w: 390, h: 844, mobile: true });
     const m = await M.js(`(() => { const r = document.querySelector('#resizer'); const b = r.getBoundingClientRect(); return { o: r.getAttribute('aria-orientation'), label: r.getAttribute('aria-label'), x: b.left + b.width / 2, y: b.top + b.height / 2, h: b.height, w: b.width }; })()`);
     check(m.o === 'horizontal' && m.label.includes('영상 높이'), `폰에서는 가로 손잡이로 바뀜 ("${m.label}")`);
-    check(m.h >= 24 && m.w >= 300, `손잡이 영역이 화면 폭 전체, 높이 ${Math.round(m.h)}px (WCAG 2.2 최소 24px)`);
+    const hit = await M.js(`(() => { const r = document.querySelector('#resizer').getBoundingClientRect(); let n = 0; for (let dy = -30; dy <= 30; dy += 2) if (document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2 + dy)?.id === 'resizer') n += 2; return n; })()`);
+    check(m.w >= 300 && hit >= 40, `손잡이를 누를 수 있는 영역이 높이 ${hit}px (눈에 보이는 줄은 ${Math.round(m.h)}px). 누르는 영역 최소 24px (WCAG 2.2), 터치 권장 44px`);
     check(await M.js(`(() => { const r = document.querySelector('#resizer').getBoundingClientRect(); const mid = document.elementFromPoint(r.left + r.width / 2, r.top + 12), edge = document.elementFromPoint(20, r.top + 12); return mid?.id === 'resizer' && edge?.id !== 'resizer'; })()`), '가운데 알약만 잡히고, 양옆은 탭 터치를 가리지 않음');
     check(await M.js(`document.querySelector('#resizer').getBoundingClientRect().top >= document.querySelector('.stage').getBoundingClientRect().bottom - 1`), '손잡이가 영상 영역 위에 겹치지 않음 (영상 컨트롤을 가리지 않음)');
     const stageH = () => M.js(`Math.round(document.querySelector('.stage').getBoundingClientRect().height)`);

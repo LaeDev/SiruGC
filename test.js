@@ -11,7 +11,7 @@ const WebSocket = require('ws');
 const PORT = 3100 + Math.floor(Math.random() * 500);
 const STATE = path.join(os.tmpdir(), `chat-test-${Date.now()}.json`);
 const AVATAR = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
-let hostKeyForTests; // main()에서 정해진 호스트 키 (다른 점검에서 호스트로 다시 접속할 때 씀)
+let mainHost; // main()의 호스트 연결 (뒤의 점검에서 호스트 권한이 필요할 때 씀)
 const V1 = 'dQw4w9WgXcQ', V2 = 'jNQXAC9IVRw', V3 = 'aqz-KE-bpKQ';
 
 // 가짜 푸시 서비스: 실제 푸시 대신 서버가 이 주소로 알림 내용을 보낸다 (PUSH_DEBUG_URL)
@@ -21,13 +21,36 @@ const sinkServer = http.createServer((req, res) => {
   req.on('end', () => { sink.hits.push(JSON.parse(body)); res.writeHead(sink.status).end(); });
 });
 
-function client(cid, name, extra = {}, { host = 'localhost', headers } = {}) {
-  const ws = new WebSocket(`ws://${host}:${PORT}`, { headers });
-  const c = { ws, msgs: [], closed: false };
-  ws.on('message', (d) => c.msgs.push(JSON.parse(d)));
-  ws.on('close', () => (c.closed = true));
-  c.open = new Promise((r) => ws.on('open', () => { ws.send(JSON.stringify({ t: 'join', name, cid, ...extra })); r(); }));
-  c.send = (m) => ws.send(JSON.stringify(m));
+// 테스트 서버들이 공통으로 쓰는 로그인 설정 (테스트는 http라서 AUTH_ALLOW_HTTP, 주소는 localhost 계열)
+const AUTH_ENV = { AUTH_HOST: 'localhost,127.0.0.1,[::1]', AUTH_ALLOW_HTTP: '1', SIGNUP_CODE: 'test-code', SIGNUP_PER_HOUR: '1000', ADMIN_NAME: '관리자', ADMIN_PASSWORD: 'admin-pass-1' };
+async function api(p, body, { port = PORT } = {}) {
+  const r = await fetch(`http://localhost:${port}${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return { status: r.status, ...(await r.json()) };
+}
+const ACCOUNTS = new Map(); // 같은 이름은 한 번만 가입하고 토큰을 다시 쓴다
+async function account(name, { port = PORT } = {}) {
+  const k = port + ':' + name;
+  if (!ACCOUNTS.has(k)) {
+    const r = await api('/auth/signup', { name, password: 'pw-' + name + '-12345', code: 'test-code' }, { port });
+    assert(r.ok, '가입 실패: ' + name + ' ' + JSON.stringify(r));
+    ACCOUNTS.set(k, r);
+  }
+  return ACCOUNTS.get(k);
+}
+// extra.acct = true 이면 그 닉네임으로 가입(한 번)해 둔 계정으로 로그인해서 입장한다 (쪽지는 로그인한 사람만 쓴다)
+function client(cid, name, extra = {}, { host = 'localhost', headers, port = PORT } = {}) {
+  const c = { ws: null, msgs: [], closed: false };
+  c.open = (async () => {
+    const { acct, ...rest } = extra;
+    const join = { t: 'join', name, cid, ...rest };
+    if (acct) join.token = (await account(name, { port })).token;
+    c.ws = new WebSocket(`ws://${host}:${port}`, { headers });
+    c.ws.on('message', (d) => c.msgs.push(JSON.parse(d)));
+    c.ws.on('close', () => (c.closed = true));
+    await new Promise((r) => c.ws.on('open', r));
+    c.ws.send(JSON.stringify(join));
+  })();
+  c.send = (m) => c.ws.send(JSON.stringify(m));
   c.find = (t) => c.msgs.find((m) => m.t === t);
   c.last = (t) => [...c.msgs].reverse().find((m) => m.t === t);
   c.clear = () => (c.msgs.length = 0);
@@ -42,14 +65,14 @@ async function until(fn, label, ms = 6000) {
 }
 
 async function main() {
-  const host = client('host-cid-0001', '호스트', { avatar: AVATAR, color: '#FF6B8B', device: 'tablet' }); await host.open; await wait();
+  const host = client('host-cid-0001', '호스트', { acct: true, avatar: AVATAR, color: '#FF6B8B', device: 'tablet' }); await host.open; await wait();
   const hj = host.find('joined');
-  hostKeyForTests = hj.hostKey;
-  assert(hj.me.host && hj.hostKey, '첫 입장자는 호스트');
+  mainHost = host;
+  assert(hj.me.host && !hj.hostKey, '첫 입장자는 호스트 (호스트 키는 없어짐)');
   assert.equal(hj.me.avatar, AVATAR, '정상 프사는 저장됨');
   assert.equal(hj.me.color, '#ff6b8b', '내 색은 소문자 #rrggbb로 저장됨');
 
-  const a = client('alice-cid-0001', '앨리스', { avatar: 'javascript:alert(1)', color: 'red;background:url(x)', device: '<b>toaster</b>' }); await a.open; await wait();
+  const a = client('alice-cid-0001', '앨리스', { acct: true, avatar: 'javascript:alert(1)', color: 'red;background:url(x)', device: '<b>toaster</b>' }); await a.open; await wait();
   const aj = a.find('joined');
   assert(!aj.me.host, '두번째는 일반 참가자');
   assert.equal(aj.me.avatar, null, '잘못된 프사는 버려짐');
@@ -79,6 +102,11 @@ async function main() {
   assert.equal(host.last('voice').list.length, 0, '음성 나가기가 방송됨');
 
   // ---- 대기열: 비어 있으면 바로 재생, 아니면 줄 서기 ----
+  a.send({ t: 'queue-add', videoId: V1 }); await wait(300);
+  assert(a.find('queue-denied') && !host.find('yt'), '호스트가 허락하지 않은 사람은 대기열에 올릴 수 없음');
+  a.clear(); host.send({ t: 'queue-grant', id: aj.me.id, on: true });
+  await until(() => a.find('user-update')?.user.canQueue === true, '허락하면 본인에게 권한이 켜졌다고 알려 줌');
+  host.clear();
   a.send({ t: 'queue-add', videoId: 'not-an-id' }); await wait(300);
   assert(!host.find('queue'), '잘못된 영상 ID는 무시');
   a.send({ t: 'queue-add', videoId: V1 });
@@ -100,15 +128,17 @@ async function main() {
   late.ws.close();
 
   // 위치 이동은 모두에게 적용
-  a.clear(); host.send({ t: 'yt-seek', time: 100 }); await wait();
-  assert(a.find('yt').time >= 100 && a.find('yt').time < 102, '위치 이동이 다른 사람에게 전달됨');
+  a.clear(); host.clear(); a.send({ t: 'yt-seek', time: 200 }); await wait(300);
+  assert(!host.find('yt') && !a.find('yt'), '호스트가 아니면 영상 위치를 옮길 수 없음');
+  host.send({ t: 'yt-seek', time: 100 }); await wait();
+  assert(a.find('yt').time >= 100 && a.find('yt').time < 102, '호스트의 위치 이동이 다른 사람에게 전달됨');
 
-  // ---- 권한: 올린 사람 또는 호스트만 빼기/건너뛰기 ----
+  // ---- 권한: 호스트만 빼기/건너뛰기 (올린 사람도 예외 없음) ----
   const b = client('bob-cid-000001', '밥'); await b.open; await wait();
   const qid = q1.queue[0].qid;
-  host.clear(); b.send({ t: 'queue-remove', qid }); b.send({ t: 'yt-next' }); await wait(300);
-  assert(!host.find('queue'), '남이 올린 건 못 뺌 (대기열 변경 방송 없음)');
-  assert(!host.find('yt'), '남이 올린 영상은 건너뛰기 불가 (영상 변경 방송 없음)');
+  host.clear(); b.send({ t: 'queue-remove', qid }); b.send({ t: 'yt-next' }); a.send({ t: 'queue-remove', qid }); a.send({ t: 'yt-next' }); await wait(300);
+  assert(!host.find('queue'), '호스트가 아니면 못 뺌, 올린 사람도 마찬가지 (대기열 변경 방송 없음)');
+  assert(!host.find('yt'), '호스트가 아니면 건너뛰기 불가, 올린 사람도 마찬가지 (영상 변경 방송 없음)');
 
   // ---- 끝남 처리: seq가 맞을 때만, 한 번만 ----
   a.send({ t: 'yt-ended', seq: 99 }); await wait(200);
@@ -123,10 +153,14 @@ async function main() {
   // 마지막 영상이 끝나면 '끝남' 상태, 이후 추가하면 다시 재생
   host.send({ t: 'yt-ended', seq: 2 });
   await until(() => host.last('yt')?.ended, '끝남 상태');
-  b.send({ t: 'queue-add', videoId: V3 });
+  b.send({ t: 'queue-add', videoId: V3 }); await wait(300);
+  assert(b.find('queue-denied') && host.last('yt')?.ended, '허락받지 않은 사람은 영상이 끝난 뒤에도 올릴 수 없음');
+  a.send({ t: 'queue-add', videoId: V3 });
   await until(() => host.last('yt')?.videoId === V3 && host.last('yt')?.playing, '끝난 뒤 추가하면 바로 재생');
-  b.send({ t: 'yt-next' }); await wait(200); // 올린 본인이 건너뛰면 끝남
-  await until(() => host.last('yt')?.ended, '본인이 건너뛰기');
+  a.send({ t: 'yt-next' }); await wait(300);
+  assert(!host.last('yt')?.ended, '올린 사람이라도 호스트가 아니면 건너뛸 수 없음');
+  host.send({ t: 'yt-next' });
+  await until(() => host.last('yt')?.ended, '호스트가 건너뛰기');
   host.send({ t: 'queue-add', videoId: V1 }); host.send({ t: 'queue-add', videoId: V2 });
   await until(() => host.last('yt')?.videoId === V1, '호스트 영상 재생');
   const q2 = await until(() => host.last('queue')?.queue.length === 1 && host.last('queue'), '대기열 1개');
@@ -157,14 +191,14 @@ async function main() {
   assert.equal((await until(() => host.find('dm-thread'), '기록')).msgs.length, 2, '대화 기록을 불러옴');
 
   // 오프라인인 사람에게도 전달 + 안 읽음 표시 + 읽음 처리
-  const z = client('zed-cid-0000001', '제드'); await z.open; await wait();
+  const z = client('zed-cid-0000001', '제드', { acct: true }); await z.open; await wait();
   const zUid = z.find('joined').me.uid; z.ws.close(); await wait(300);
   a.send({ t: 'dm', to: zUid, text: '자고 있니?' }); await wait(500);
-  const z2 = client('zed-cid-0000001', '제드'); await z2.open; await wait();
+  const z2 = client('zed-cid-0000001', '제드', { acct: true }); await z2.open; await wait();
   const inbox = z2.find('joined').inbox;
   assert(inbox.length === 1 && inbox[0].uid === aliceUid && inbox[0].unread === 1 && inbox[0].last.text === '자고 있니?' && inbox[0].online, '오프라인 쪽지가 안 읽음 1로 도착');
   z2.send({ t: 'dm-read', with: aliceUid }); await wait(300); z2.ws.close(); await wait(200);
-  const z3 = client('zed-cid-0000001', '제드'); await z3.open; await wait();
+  const z3 = client('zed-cid-0000001', '제드', { acct: true }); await z3.open; await wait();
   assert.equal(z3.find('joined').inbox[0].unread, 0, '읽음 처리가 저장됨');
 
   // ---- 푸시 알림: 화면을 안 볼 때만, 위장 설정대로 ----
@@ -201,9 +235,9 @@ async function main() {
   assert(!host.find('queue'), '같은 자리, 정수가 아닌 위치, 없는 항목은 무시');
   a.send({ t: 'queue-add', videoId: V2 }); const q4 = await until(() => host.last('queue')?.queue.length === 4 && host.last('queue'), '앨리스가 하나 추가');
   const mine = q4.queue[3].qid; host.clear(); a.clear();
-  a.send({ t: 'queue-move', qid: ids[1], to: 0 }); await wait(400);
-  assert(!host.find('queue'), '남이 올린 항목은 일반 참가자가 옮길 수 없음');
-  a.send({ t: 'queue-move', qid: mine, to: 0 }); await until(() => host.last('queue')?.queue[0].qid === mine, '자기가 올린 항목은 옮길 수 있음');
+  a.send({ t: 'queue-move', qid: ids[1], to: 0 }); a.send({ t: 'queue-move', qid: mine, to: 0 }); await wait(400);
+  assert(!host.find('queue'), '일반 참가자는 순서를 바꿀 수 없음 (자기가 올린 항목도)');
+  host.send({ t: 'queue-move', qid: mine, to: 0 }); await until(() => host.last('queue')?.queue[0].qid === mine, '호스트는 옮길 수 있음');
   assert(a.find('queue'), '바뀐 순서는 모두에게 방송됨');
   host.send({ t: 'queue-remove', qid: mine });
   for (const id of ids) host.send({ t: 'queue-remove', qid: id });
@@ -229,11 +263,12 @@ async function main() {
   assert(b.closed, 'IP 밴 대상 끊김');
   const c = client('carol-cid-00001', '캐롤'); await c.open; await wait();
   assert(c.find('banned'), '같은 IP 다른 cid도 차단');
-  const h2 = client('host-cid-0001', '호스트', { hostKey: hj.hostKey }); await h2.open; await wait();
-  assert(h2.find('joined').me.host && h2.find('joined').bans.length === 2, '호스트는 밴 중에도 입장 + 목록 확인');
+  assert(!host.closed, 'IP 밴에도 같은 IP의 호스트는 끊기지 않음');
+  const bansNow = host.last('bans').bans;
+  assert(bansNow.length === 3, '호스트 화면에 밴 목록이 보임 (사용자 밴은 기기와 계정 둘, IP 밴 하나)');
 
   // 해제 후 입장 가능
-  for (const ban of h2.find('joined').bans) h2.send({ t: 'unban', id: ban.id });
+  for (const ban of bansNow) host.send({ t: 'unban', id: ban.id });
   await wait();
   const d = client('dave-cid-000001', '데이브'); await d.open; await wait();
   assert(d.find('joined'), '해제 후 입장 가능');
@@ -241,7 +276,7 @@ async function main() {
 
 // 쪽지 완성: 읽음 표시, 삭제, 대화 정리, 차단, 전체 회원 목록
 async function dmFullCheck() {
-  const mk = async (cid, name) => { const c = client(cid, name); await c.open; await wait(300); c.uid = c.find('joined').me.uid; return c; };
+  const mk = async (cid, name) => { const c = client(cid, name, { acct: true }); await c.open; await wait(300); c.uid = c.find('joined').me.uid; return c; };
   const x1 = await mk('dmf-1-cid-000001', '쪽지일'), x2 = await mk('dmf-2-cid-000001', '쪽지이'), x3 = await mk('dmf-3-cid-000001', '쪽지삼');
   x3.ws.close(); await wait(300); // 삼은 오프라인
 
@@ -276,7 +311,7 @@ async function dmFullCheck() {
   x1.clear(); x1.send({ t: 'dm-history', with: x2.uid }); assert((await until(() => x1.find('dm-thread'), '기록')).msgs.length >= 2, '상대 화면의 기록은 그대로');
   x1.send({ t: 'dm', to: x2.uid, text: '정리 후' }); await wait(500);
   x2.clear(); x2.send({ t: 'dm-history', with: x1.uid }); assert.deepEqual((await until(() => x2.find('dm-thread'), '기록')).msgs.map((m) => m.text), ['정리 후'], '정리한 뒤 온 쪽지만 보임');
-  const x2b = client('dmf-2-cid-000001', '쪽지이'); await x2b.open; await wait(300);
+  const x2b = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2b.open; await wait(300);
   assert.equal(x2b.find('joined').inbox.find((c) => c.uid === x1.uid).last.text, '정리 후', '다시 접속해도 정리가 유지되고 목록 미리보기는 새 쪽지');
   x2b.ws.close();
 
@@ -296,7 +331,7 @@ async function dmFullCheck() {
   x2.clear(); x2.send({ t: 'dm', to: x1.uid, text: '내가 차단한 사람에게' }); assert((await until(() => x2.find('dm-error'), '오류')).msg.includes('차단'), '내가 차단한 사람에게는 보낼 수 없고 이유를 알려 줌');
   x2.send({ t: 'dm-block', uid: x1.uid, on: false }); await until(() => x2.last('blocks')?.list.length === 0, '차단 해제'); x1.clear(); x2.clear(); await wait(450);
   x1.send({ t: 'dm', to: x2.uid, text: '해제 뒤' }); await until(() => x2.find('dm'), '차단을 풀면 다시 도착함');
-  const x2c = client('dmf-2-cid-000001', '쪽지이'); await x2c.open; await wait(300);
+  const x2c = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2c.open; await wait(300);
   assert.deepEqual(x2c.find('joined').blocks, [], '입장할 때 차단 목록을 받음');
   x2.send({ t: 'dm-block', uid: 'ffffffffffff', on: true }); x2.send({ t: 'dm-block', uid: x2.uid, on: true }); await wait(300);
   assert(!x2.msgs.some((m) => m.t === 'blocks' && m.list.includes('ffffffffffff')) && !x2.msgs.some((m) => m.t === 'blocks' && m.list.includes(x2.uid)), '모르는 사람이나 나 자신은 차단할 수 없음');
@@ -308,7 +343,7 @@ async function dmFullCheck() {
 // 서로 다른 IP는 127.0.0.1 과 ::1 로 만든다
 async function nameCheck() {
   const A = '127.0.0.1', B = '[::1]';
-  const a = client('nm-cid-a000001', '닉네임', { avatar: AVATAR, color: '#112233' }, { host: A }); await a.open; await wait(250);
+  const a = client('nm-cid-a000001', '닉네임', { acct: true, avatar: AVATAR, color: '#112233' }, { host: A }); await a.open; await wait(250);
   const aj = a.find('joined'); assert(aj, '처음 쓰는 닉네임은 그냥 들어감');
   const b = client('nm-cid-b000001', ' 닉  네임 ', {}, { host: B }); await b.open; await wait(350);
   assert(b.find('name-taken')?.name && !b.find('joined'), '다른 IP에서 같은 닉네임(공백 차이)은 들어올 수 없음');
@@ -323,10 +358,10 @@ async function nameCheck() {
   // 핵심: 같은 IP, 같은 닉네임이라도 내 쪽지·프로필을 가져갈 수 없다
   const c = client('nm-cid-c000001', '닉네임', { avatar: '', color: '#ffffff' }, { host: A }); await c.open; await wait(350);
   assert(c.find('name-taken') && !c.find('joined') && !c.find('inbox'), '같은 IP의 같은 닉네임도 들어올 수 없음 (같은 사람으로 합쳐지지 않음)');
-  const d = client('nm-cid-d000009', '보내는이'); await d.open; await wait(200);
+  const d = client('nm-cid-d000009', '보내는이', { acct: true }); await d.open; await wait(200);
   a.clear(); c.clear(); d.send({ t: 'dm', to: aj.me.uid, text: '나에게만 와야 함' }); await wait(400);
   assert(a.find('dm') && !c.find('dm'), '쪽지는 그 닉네임을 쓰려던 다른 사람에게 가지 않음');
-  const a2 = client('nm-cid-a000001', '닉네임', {}, { host: A }); await a2.open; await wait(300);
+  const a2 = client('nm-cid-a000001', '닉네임', { acct: true }, { host: A }); await a2.open; await wait(300);
   assert(a2.find('joined') && !a2.find('name-taken'), '같은 기기(탭 두 개)는 그대로 들어올 수 있음');
   // 쓸 수 없는 글자: 보이지 않는 문자, 전각, 이모티콘, 태그, 한글 채움 문자
   for (const bad of ['시\u200B루', 'ＮＩＣＫ', '😎멋쟁이', '<b>x</b>', 'ㅤ', '   ', '_ _']) {
@@ -347,9 +382,9 @@ async function nameCheck() {
 
 // 입장 화면에서 '쪽지함'으로 들어온 사람: 방에는 보이지도 들어가지도 않고, 쪽지만 주고받는다
 async function dmOnlyCheck() {
-  const room = client('do-room-0000001', '방사람'); await room.open; await wait(250);
+  const room = client('do-room-0000001', '방사람', { acct: true }); await room.open; await wait(250);
   const rj = room.find('joined');
-  const d = client('do-dm-00000001', '쪽지러', { dmOnly: true, device: 'pc' }, { host: '127.0.0.1' }); await d.open; await wait(300);
+  const d = client('do-dm-00000001', '쪽지러', { acct: true, dmOnly: true, device: 'pc' }, { host: '127.0.0.1' }); await d.open; await wait(300);
   const dj = d.find('joined');
   assert(dj?.dmOnly === true && !dj.me.host && dj.users.length === 0 && !dj.ice, '쪽지만 쓰는 연결은 방 정보(참가자·영상·음성 서버)를 받지 않음');
   assert(!room.find('user-join'), '방 사람들에게 입장 알림이 가지 않음');
@@ -373,10 +408,311 @@ async function dmOnlyCheck() {
   assert(twin.find('name-taken') && !twin.find('joined'), '같은 IP에서도 쪽지만 쓰는 사람의 닉네임을 쓸 수 없음 (같은 사람으로 합쳐지지 않음)');
   room.clear(); d.ws.terminate(); await wait(2200); // 폰이 아니라서 유예 1.5초
   assert(!room.find('user-leave') && !room.find('user-away'), '쪽지만 쓰는 사람이 나가도 방에는 아무 알림이 가지 않음');
-  const d2 = client('do-dm-00000002', '쪽지러셋', { dmOnly: true, hostKey: hostKeyForTests }); await d2.open; await wait(300);
-  assert(!d2.find('joined').me.host && !d2.find('joined').hostKey, '호스트 키를 가져와도 쪽지만 쓰는 연결은 호스트가 아님');
+  const d2 = client('do-dm-00000002', '쪽지러셋', { acct: true, dmOnly: true }); await d2.open; await wait(300);
+  assert(!d2.find('joined').me.host, '쪽지만 쓰는 연결은 호스트가 아님');
   for (const x of [room, late, d2]) x.send({ t: 'bye' });
   await wait(400);
+}
+
+// 호스트 규칙: 맨 처음 들어온 사람, 승계, 직접 넘기기, 오래 끊긴 호스트(실제 3분, 테스트 1.5초), 대기열 추가 권한. 비어 있는 방이 필요해서 서버를 따로 띄운다
+async function hostCheck() {
+  const port = PORT + 800;
+  const env = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: STATE + '.host', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'),
+    HOST_AWAY_MS: '1500', RESUME_GRACE_MS: '800', RESUME_GRACE_MOBILE_MS: '6000', AWAY_MS: '300' };
+  const sv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env, stdio: 'ignore' });
+  const cl = (cid, name, extra) => client(cid, name, extra, { port });
+  try {
+    await wait(1200);
+    const A = cl('ho-a-000000001', '가나다'); await A.open; await wait(250);
+    const B = cl('ho-b-000000001', '라마바'); await B.open; await wait(250);
+    const C = cl('ho-c-000000001', '사아자'); await C.open; await wait(250);
+    const aj = A.find('joined'), bj = B.find('joined'), cj = C.find('joined');
+    assert(aj.me.host && !bj.me.host && !cj.me.host && !aj.hostKey, '맨 처음 들어온 사람이 호스트');
+    assert(bj.users.find((u) => u.id === aj.me.id).host === true, '다른 사람의 목록에서 호스트가 표시됨');
+    for (const x of [B, C]) { x.send({ t: 'host-give', id: cj.me.id }); x.send({ t: 'queue-grant', id: bj.me.id, on: true }); x.send({ t: 'ban', id: aj.me.id, mode: 'kick' }); }
+    await wait(300);
+    assert(!A.closed && !B.msgs.some((m) => m.t === 'host' || m.t === 'user-update'), '호스트가 아닌 사람의 호스트 넘기기·권한 부여·강퇴는 무시됨');
+
+    // 직접 넘기기
+    A.clear(); B.clear(); C.clear();
+    A.send({ t: 'host-give', id: cj.me.id });
+    await until(() => B.find('host')?.id === cj.me.id, '호스트를 넘기면 모두에게 알려 줌');
+    assert(C.msgs.some((m) => m.t === 'user-update' && m.user.id === cj.me.id && m.user.host), '새 호스트가 목록에 표시됨');
+    assert(A.msgs.some((m) => m.t === 'user-update' && m.user.id === aj.me.id && !m.user.host), '넘긴 사람은 더 이상 호스트가 아님');
+    A.send({ t: 'ban', id: bj.me.id, mode: 'kick' }); await wait(300);
+    assert(!B.closed, '넘긴 사람은 더 이상 강퇴할 수 없음');
+
+    // 호스트가 나가면 가장 오래 있던 사람에게 (A가 B보다 먼저 들어왔다)
+    A.clear(); B.clear();
+    C.send({ t: 'bye' });
+    await until(() => B.find('host')?.id === aj.me.id, '호스트가 나가면 가장 오래 있던 사람이 이어받음');
+    assert(A.msgs.some((m) => m.t === 'user-update' && m.user.id === aj.me.id && m.user.host), '이어받은 사람 화면에서도 호스트로 바뀜');
+
+    // 대기열 추가 권한: 기본은 호스트만, 호스트가 주고 뺏는다
+    B.clear(); B.send({ t: 'queue-add', videoId: V1 }); await wait(300);
+    assert(B.find('queue-denied') && !B.find('yt'), '허락받지 않은 사람은 대기열에 올릴 수 없음');
+    A.send({ t: 'queue-grant', id: bj.me.id, on: true });
+    await until(() => B.msgs.some((m) => m.t === 'user-update' && m.user.id === bj.me.id && m.user.canQueue), '허락하면 본인에게 알려 줌');
+    B.clear(); B.send({ t: 'queue-add', videoId: V1 });
+    await until(() => B.find('yt'), '허락받은 사람은 올릴 수 있음');
+    A.send({ t: 'queue-grant', id: bj.me.id, on: false });
+    await until(() => B.msgs.some((m) => m.t === 'user-update' && m.user.id === bj.me.id && !m.user.canQueue), '뺏으면 알려 줌');
+    B.clear(); B.send({ t: 'queue-add', videoId: V2 }); await wait(300);
+    assert(B.find('queue-denied'), '권한을 뺏기면 다시 올릴 수 없음');
+
+    // 호스트의 연결이 오래 끊기면 다음 사람에게 (폰은 유예가 길어서 아직 방에 남아 있다)
+    const D = cl('ho-d-000000001', '타파하', { device: 'mobile' }); await D.open; await wait(250);
+    const dj = D.find('joined');
+    A.send({ t: 'host-give', id: dj.me.id }); await until(() => D.find('host')?.id === dj.me.id, '폰 사용자가 호스트가 됨');
+    A.clear(); B.clear();
+    D.ws.terminate(); await wait(700);
+    assert(!A.msgs.some((m) => m.t === 'host'), '잠깐 끊긴 호스트는 바로 바꾸지 않음');
+    await until(() => A.msgs.some((m) => m.t === 'host' && m.id === aj.me.id), '오래 끊긴 호스트는 가장 오래 있던 사람에게 넘어감', 4000);
+    const D2 = cl('ho-d-000000001', '타파하', { device: 'mobile', resume: { id: dj.me.id, secret: dj.resume } }); await D2.open; await wait(300);
+    const d2j = D2.find('joined');
+    assert(d2j.resumed && !d2j.me.host && d2j.users.find((u) => u.id === aj.me.id).host, '돌아온 옛 호스트는 호스트를 자동으로 되찾지 않음');
+
+    // 방이 비면 호스트도, 대기열 추가 권한도 처음으로
+    A.send({ t: 'queue-grant', id: bj.me.id, on: true }); await wait(200);
+    for (const x of [A, B, D2]) x.send({ t: 'bye' });
+    await wait(600);
+    const E = cl('ho-e-000000001', '차카타'); await E.open; await wait(250);
+    const F = cl('ho-b-000000001', '라마바'); await F.open; await wait(250);
+    assert(E.find('joined').me.host && !F.find('joined').me.host && !F.find('joined').me.canQueue, '방이 비었다가 다시 열리면 먼저 들어온 사람이 호스트이고 대기열 권한은 초기화됨');
+    F.send({ t: 'queue-add', videoId: V3 }); await wait(300);
+    assert(F.find('queue-denied'), '초기화된 권한으로는 올릴 수 없음');
+    for (const x of [E, F]) x.send({ t: 'bye' });
+    await wait(600);
+
+    // 쪽지만 쓰는 사람은 방이 비어 있어도 호스트가 되지 않는다
+    const G = cl('ho-g-000000001', '파하가', { acct: true, dmOnly: true }); await G.open; await wait(250);
+    const H = cl('ho-h-000000001', '나다라'); await H.open; await wait(250);
+    assert(!G.find('joined').me.host && H.find('joined').me.host, '쪽지만 쓰는 사람이 먼저 와도 방에 처음 들어온 사람이 호스트');
+    for (const x of [G, H]) x.send({ t: 'bye' });
+    await wait(300);
+  } finally { sv.kill(); fs.rmSync(STATE + '.host', { force: true }); }
+}
+
+// 계정·로그인: 가입 코드, 잠금, 토큰 순환과 도난 감지, 닉네임 변경·예약, 비밀번호 변경, 삭제, 관리자, 계정 관리, 게스트 제한. 타이머를 줄인 서버를 따로 띄운다
+async function accountCheck() {
+  const port = PORT + 900;
+  const env = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: STATE + '.acct', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), SIGNUP_PER_HOUR: '40',
+    TOKEN_ROTATE_MS: '1500', TOKEN_GRACE_MS: '1200', RENAME_GAP_MS: '2500', NAME_RESERVE_MS: '2500', LOGIN_MAX_FAILS: '3', LOGIN_LOCK_MS: '1500', HOST_AWAY_MS: '1500', RESUME_GRACE_MS: '800' };
+  const sv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env, stdio: 'ignore' });
+  const O = { port }, post = (p, b) => api(p, b, O), pwOf = (n) => 'pw-' + n + '-12345';
+  const signup = (name, extra = {}) => post('/auth/signup', { name, password: pwOf(name), code: 'test-code', ...extra });
+  const live = []; let n = 0;
+  const cl = async (extra = {}, name) => { const c = client('ac-cid-' + String(++n).padStart(7, '0'), name || '접속' + n, extra, O); live.push(c); await c.open; await wait(250); return c; };
+  const bye = async () => { for (const c of live.splice(0)) if (c.ws.readyState === 1) c.send({ t: 'bye' }); await wait(500); };
+  const raw = (reqOpts, body) => new Promise((ok) => { const rq = http.request({ host: '127.0.0.1', port, ...reqOpts }, (res) => { let d = ''; res.on('data', (x) => (d += x)); res.on('end', () => ok({ status: res.statusCode, body: d })); }); rq.end(body); });
+  try {
+    await wait(1500);
+    // ---- 어디서 로그인을 받는가 ----
+    const st = await (await fetch(`http://localhost:${port}/auth/status`)).json();
+    assert(st.allowed && st.signupOpen, '허용된 주소에서는 가입·로그인이 열려 있음');
+    assert(JSON.parse((await raw({ path: '/auth/status', headers: { Host: 'evil.example' } })).body).allowed === false, '허용 목록에 없는 주소로 들어오면 로그인·가입이 닫혀 있음');
+    assert.equal((await raw({ path: '/auth/login', method: 'POST', headers: { Host: 'evil.example', 'Content-Type': 'application/json' } }, '{}')).status, 403, '다른 주소로 로그인을 시도하면 거절');
+    assert.equal((await raw({ path: '/auth/login', method: 'POST', headers: { Host: 'localhost', 'Content-Type': 'text/plain' } }, '{}')).status, 415, 'JSON이 아닌 요청은 거절 (다른 사이트의 폼 전송을 막음)');
+    assert.equal((await raw({ path: '/auth/login', method: 'POST', headers: { Host: 'localhost', 'Content-Type': 'application/json', Origin: 'https://evil.example' } }, '{}')).status, 403, '출처가 다른 요청은 거절');
+
+    // ---- 가입 ----
+    assert.equal((await signup('가입자', { code: 'wrong' })).error, 'code', '가입 코드가 틀리면 거절');
+    for (const bad of ['😎', 'a\u200Bb', '<b>']) assert.equal((await signup(bad)).error, 'name', '쓸 수 없는 닉네임은 거절: ' + JSON.stringify(bad));
+    assert.equal((await post('/auth/signup', { name: '짧은비번', password: 'abc', code: 'test-code' })).error, 'password', '짧은 비밀번호는 거절');
+    assert.equal((await post('/auth/signup', { name: 'SamePassName', password: 'samepassname', code: 'test-code' })).error, 'password', '닉네임과 같은 비밀번호는 거절');
+    const s1 = await signup('가입자'); assert(s1.ok && s1.token.includes('.'), '가입하면 토큰을 받음');
+    assert.equal((await signup(' 가 입 자 ')).error, 'taken', '공백만 다른 닉네임으로는 가입할 수 없음');
+    assert(!JSON.stringify(JSON.parse(fs.readFileSync(STATE + '.acct', 'utf8'))).includes(pwOf('가입자')), '저장 파일에 비밀번호 원문이 없음');
+
+    // ---- 로그인과 잠금 ----
+    const bad = await post('/auth/login', { name: '가입자', password: 'nope-nope-1' });
+    assert(bad.status === 401 && bad.error === 'bad', '틀린 비밀번호');
+    assert.equal((await post('/auth/login', { name: '없는사람', password: 'nope-nope-1' })).msg, bad.msg, '없는 닉네임도 같은 안내 (있는지 알아내지 못하게)');
+    await post('/auth/login', { name: '가입자', password: 'nope-nope-2' }); await post('/auth/login', { name: '가입자', password: 'nope-nope-3' });
+    const locked = await post('/auth/login', { name: '가입자', password: pwOf('가입자') });
+    assert(locked.status === 429 && locked.error === 'locked', '여러 번 틀리면 맞는 비밀번호로도 잠시 잠김');
+    await wait(1700);
+    assert((await post('/auth/login', { name: '가입자', password: pwOf('가입자') })).ok, '잠금이 지나면 다시 로그인됨');
+
+    // ---- 토큰으로 입장 / 게스트 제한 ----
+    const w1 = await cl({ token: s1.token }, '아무이름');
+    const j1 = w1.find('joined');
+    assert(j1.me.name === '가입자' && j1.me.acct === true && /^[0-9a-f]{12}$/.test(j1.me.uid), '토큰으로 들어오면 계정의 닉네임으로 입장함 (화면이 보낸 이름은 무시)');
+    const g1 = await cl({}, '가입자'); assert(g1.find('name-taken') && !g1.find('joined'), '계정이 쓰는 닉네임을 게스트가 쓸 수 없음');
+    const g2 = await cl({ dmOnly: true }, '게스트쪽지'); assert(g2.find('login-required') && !g2.find('joined'), '쪽지함은 로그인이 필요함');
+    const g3 = await cl({}, '게스트셋');
+    g3.send({ t: 'dm', to: j1.me.uid, text: '게스트가 보내는 쪽지' }); g3.send({ t: 'dm-members' }); g3.send({ t: 'push-sub', sub: { endpoint: 'https://fcm.googleapis.com/x', keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) } } }); await wait(400);
+    assert(g3.msgs.filter((m) => m.t === 'dm-error').length === 3 && !w1.find('dm') && !g3.find('members') && !g3.find('push-ok'), '게스트는 쪽지·쪽지 상대 목록·푸시 구독을 쓸 수 없음');
+    assert(g3.find('joined').me.uid === null && g3.find('joined').me.acct === false && !g3.find('joined').inbox.length, '게스트에게는 uid가 없음');
+    const g4 = await cl({ token: 'abc.def' }, '토큰틀림'); assert(g4.find('auth-expired') && g4.find('joined').me.acct === false, '틀린 토큰은 알리고 게스트로 계속함');
+
+    // ---- 토큰 순환과 도난 감지 ----
+    const r1 = await signup('토큰순환'), t0 = r1.token;
+    let a = await cl({ token: t0 }); assert(!a.find('joined').token, '3일이 지나기 전에는 토큰을 바꾸지 않음'); a.send({ t: 'bye' });
+    await wait(1500);
+    a = await cl({ token: t0 }); const t1 = a.find('joined').token;
+    assert(t1 && t1 !== t0 && t1.includes('.'), '3일(테스트에서는 1.5초)이 지나면 새 토큰을 내려 줌'); a.send({ t: 'bye' });
+    const b = await cl({ token: t0 });
+    assert(b.find('joined')?.me.acct && !b.find('auth-expired') && !b.find('joined').token, '바뀐 직후의 옛 토큰은 유예 시간 동안 받아 줌'); b.send({ t: 'bye' });
+    await wait(1400);
+    const c = await cl({ token: t0 });
+    assert(c.find('auth-expired')?.reuse === true && c.find('joined').me.acct === false, '유예가 끝난 옛 토큰이 다시 오면 도난으로 보고 알림');
+    const d = await cl({ token: t1 });
+    assert(d.find('auth-expired') && !d.find('joined').me.acct, '그 기기의 로그인은 끊겨서 새 토큰도 쓸 수 없음');
+    await bye();
+
+    // ---- 닉네임 변경: 7일에 한 번, 옛 이름 예약, 이전 닉네임 표시 ----
+    const rn = await signup('이름바꿈'), obsA = await signup('관찰자일');
+    const obs = await cl({ token: obsA.token }); const mine = await cl({ token: rn.token });
+    let r = await post('/auth/rename', { token: rn.token, name: '새이름' });
+    assert(r.ok && r.name === '새이름' && r.prev === '이름바꿈', '닉네임을 바꿈');
+    assert(obs.msgs.some((m) => m.t === 'renamed' && m.name === '새이름' && m.prev === '이름바꿈'), '바뀐 이름이 모두에게 알려짐');
+    assert.equal((await post('/auth/rename', { token: rn.token, name: '또바꿈' })).error, 'gap', '7일(테스트에서는 2.5초)에 한 번만 바꿀 수 있음');
+    const g5 = await cl({}, '이름바꿈'); assert(g5.find('name-taken'), '바꾼 뒤 옛 닉네임은 게스트가 못 씀(예약)');
+    assert.equal((await signup('이름바꿈')).error, 'taken', '옛 닉네임으로는 가입도 못 함(예약)');
+    assert.equal((await post('/auth/login', { name: '이름바꿈', password: pwOf('이름바꿈') })).status, 401, '옛 닉네임으로는 로그인되지 않음');
+    assert((await post('/auth/login', { name: '새이름', password: pwOf('이름바꿈') })).ok, '새 닉네임으로 로그인됨');
+    const v = await cl({}, '늦은손님'); assert.equal(v.find('joined').users.find((u) => u.name === '새이름').prev, '이름바꿈', '이전 닉네임이 다른 사람에게 보임');
+    await wait(2700);
+    const g6 = await cl({}, '이름바꿈'); assert(g6.find('joined'), '예약 기간이 지나면 옛 닉네임을 쓸 수 있음');
+    const tk = await signup('사용중확인');
+    assert.equal((await post('/auth/rename', { token: tk.token, name: '이름바꿈' })).error, 'taken', '지금 방에 있는 사람의 닉네임으로는 바꿀 수 없음');
+    assert((await post('/auth/rename', { token: rn.token, name: '세번째이름' })).ok, '간격이 지나면 다시 바꿀 수 있음');
+    await bye();
+
+    // ---- 비밀번호 변경·로그아웃 ----
+    const pw = await signup('비번바꿈'), dev2 = await post('/auth/login', { name: '비번바꿈', password: pwOf('비번바꿈') });
+    const live2 = await cl({ token: dev2.token }), live1 = await cl({ token: pw.token }), keep = live1.find('joined').me.id;
+    assert.equal((await post('/auth/password', { token: pw.token, old: 'wrong-wrong-1', new: 'brand-new-pass-1', keep })).error, 'bad', '현재 비밀번호가 틀리면 못 바꿈');
+    assert.equal((await post('/auth/password', { token: pw.token, old: pwOf('비번바꿈'), new: 'short', keep })).error, 'password', '너무 짧은 새 비밀번호는 거절');
+    const pc = await post('/auth/password', { token: pw.token, old: pwOf('비번바꿈'), new: 'brand-new-pass-1', keep });
+    assert(pc.ok && pc.token && pc.token !== pw.token, '비밀번호를 바꾸면 이 기기는 새 토큰을 받음');
+    await wait(300);
+    assert(live2.find('logged-out')?.reason === 'password' && !live1.find('logged-out'), '다른 기기의 연결은 끊기고 요청한 기기는 유지됨');
+    assert(!(await cl({ token: dev2.token })).find('joined').me.acct && !(await cl({ token: pw.token })).find('joined').me.acct, '옛 토큰은 모두 쓸 수 없음');
+    assert((await post('/auth/login', { name: '비번바꿈', password: 'brand-new-pass-1' })).ok, '새 비밀번호로 로그인됨');
+    assert((await cl({ token: pc.token })).find('joined').me.acct, '새 토큰으로 입장됨');
+    await post('/auth/logout', { token: pc.token });
+    assert(!(await cl({ token: pc.token })).find('joined').me.acct, '로그아웃한 토큰은 쓸 수 없음');
+    const la = await post('/auth/login', { name: '비번바꿈', password: 'brand-new-pass-1' }), lb = await post('/auth/login', { name: '비번바꿈', password: 'brand-new-pass-1' });
+    const liveB = await cl({ token: lb.token });
+    await post('/auth/logout-all', { token: la.token }); await wait(300);
+    assert(liveB.find('logged-out')?.reason === 'logout-all' && !(await cl({ token: lb.token })).find('joined').me.acct, '모든 기기에서 로그아웃하면 다른 기기도 끊김');
+    await bye();
+
+    // ---- 계정 삭제: 상대 화면에는 "탈퇴한 사용자" ----
+    const del = await signup('탈퇴할사람'), friend = await signup('남는사람');
+    const dc = await cl({ token: del.token }), fc = await cl({ token: friend.token });
+    const duid = dc.find('joined').me.uid, fuid = fc.find('joined').me.uid;
+    dc.send({ t: 'dm', to: fuid, text: '남기는 말' }); await until(() => fc.find('dm'), '쪽지 도착');
+    assert.equal((await post('/auth/delete', { token: del.token, password: 'nope-nope-12' })).error, 'bad', '비밀번호가 틀리면 삭제되지 않음');
+    assert((await post('/auth/delete', { token: del.token, password: pwOf('탈퇴할사람') })).ok, '삭제됨');
+    await wait(400);
+    assert(dc.find('logged-out')?.reason === 'deleted', '삭제한 계정의 연결은 끊김');
+    assert(fc.msgs.some((m) => m.t === 'renamed' && m.uid === duid && m.name === '탈퇴한 사용자' && m.deleted), '상대에게 "탈퇴한 사용자"로 알려짐');
+    fc.clear(); fc.send({ t: 'dm-history', with: duid });
+    const th = await until(() => fc.find('dm-thread'), '기록');
+    assert(th.msgs.some((m) => m.text === '남기는 말') && th.peer.name === '탈퇴한 사용자', '쪽지 기록은 상대에게 남고 이름은 "탈퇴한 사용자"');
+    fc.clear(); fc.send({ t: 'dm', to: duid, text: '탈퇴한 사람에게' }); fc.send({ t: 'dm-members' });
+    assert((await until(() => fc.find('dm-error'), '오류')).msg.includes('탈퇴'), '탈퇴한 사용자에게는 보낼 수 없음');
+    assert(!(await until(() => fc.find('members'), '목록')).list.some((p) => p.uid === duid), '쪽지 상대 목록에서도 빠짐');
+    assert.equal((await post('/auth/login', { name: '탈퇴할사람', password: pwOf('탈퇴할사람') })).status, 401, '삭제한 계정으로는 로그인되지 않음');
+    assert.equal((await fetch(`http://localhost:${port}/a/${duid}`)).status, 404, '탈퇴한 사람의 프로필 사진도 사라짐');
+    const again = await signup('탈퇴할사람'); assert(again.ok, '같은 이름으로 다시 가입할 수 있음');
+    assert((await cl({ token: again.token })).find('joined').me.uid !== duid, '다시 가입하면 새 사람(새 uid)');
+    await bye();
+
+    // ---- 관리자 ----
+    const ad = await post('/auth/login', { name: '관리자', password: 'admin-pass-1' }); assert(ad.ok, '관리자 계정이 설정 파일대로 만들어져 로그인됨');
+    const adc = await cl({ token: ad.token });
+    assert(adc.find('joined').me.admin === true && !adc.find('joined').me.host, '관리자는 방에 먼저 와도 호스트가 되지 않음 (승계 순번에 안 낌)');
+    const hostG = await cl({}, '게스트호스트');
+    assert(hostG.find('joined').me.host && adc.msgs.some((m) => m.t === 'user-join' && m.user.name === '게스트호스트' && m.user.host), '그 다음에 들어온 사람이 호스트가 됨');
+    for (const p of ['/auth/password', '/auth/rename', '/auth/delete']) assert.equal((await post(p, { token: ad.token, name: '바꿈', old: 'x', new: 'y', password: 'admin-pass-1' })).error, 'admin', '관리자 계정은 앱 안에서 바꿀 수 없음: ' + p);
+    hostG.send({ t: 'ban', id: adc.find('joined').me.id, mode: 'kick' }); await wait(300);
+    assert(!adc.closed, '호스트는 관리자를 내보낼 수 없음');
+    const victim = await cl({}, '관리대상게스트');
+    hostG.send({ t: 'ban', id: victim.find('joined').me.id, mode: 'ip' }); await wait(400);
+    assert(victim.closed, '호스트의 IP 밴');
+    assert(!hostG.closed && !adc.closed, '같은 IP여도 호스트와 관리자는 끊기지 않음');
+    assert((await cl({ token: (await post('/auth/login', { name: '관리자', password: 'admin-pass-1' })).token })).find('joined')?.me.admin, '관리자는 IP 밴에도 들어올 수 있음');
+    assert((await cl({}, '밴된IP손님')).find('banned'), '일반 사람은 IP 밴 때문에 못 들어옴');
+    for (const x of hostG.last('bans').bans) hostG.send({ t: 'unban', id: x.id }); await wait(300);
+    adc.send({ t: 'ban', id: hostG.find('joined').me.id, mode: 'kick' }); await wait(400);
+    assert(hostG.closed, '관리자는 호스트도 내보낼 수 있음');
+    await bye();
+
+    // ---- 계정 관리 (호스트·관리자) ----
+    const mg = await signup('관리대상'), mgc = await cl({ token: mg.token }); // 맨 처음 들어온 로그인한 사람 = 호스트
+    assert(mgc.find('joined').me.host, '맨 처음 들어온 계정이 호스트');
+    const normal = await cl({}, '일반게스트');
+    normal.send({ t: 'acct-list' }); normal.send({ t: 'acct-reset', uid: mgc.find('joined').me.uid }); await wait(300);
+    assert(!normal.find('accts') && !normal.find('acct-reset'), '호스트가 아닌 사람은 계정 관리를 할 수 없음');
+    const tgt = await signup('초기화대상'), tgtc = await cl({ token: tgt.token }), tuid = tgtc.find('joined').me.uid;
+    mgc.send({ t: 'acct-list' });
+    const list = (await until(() => mgc.find('accts'), '목록')).list;
+    assert(list.some((x) => x.uid === tuid && x.role === 'user' && x.online) && list.some((x) => x.role === 'admin' && x.name === '관리자'), '계정 목록(접속 여부, 관리자 표시)');
+    mgc.send({ t: 'acct-reset', uid: list.find((x) => x.role === 'admin').uid }); mgc.send({ t: 'acct-delete', uid: list.find((x) => x.role === 'admin').uid }); mgc.send({ t: 'acct-ban', uid: list.find((x) => x.role === 'admin').uid, on: true }); await wait(300);
+    assert(!mgc.find('acct-reset') && !mgc.find('acct-deleted') && (await post('/auth/login', { name: '관리자', password: 'admin-pass-1' })).ok, '관리자 계정은 초기화·삭제·밴할 수 없음');
+    mgc.send({ t: 'acct-reset', uid: tuid });
+    const rs = await until(() => mgc.find('acct-reset'), '임시 비밀번호');
+    assert(/^[A-Za-z0-9]{10}$/.test(rs.temp) && rs.name === '초기화대상', '임시 비밀번호가 호스트에게만 내려옴');
+    await wait(300);
+    assert(tgtc.find('logged-out')?.reason === 'reset' && !(await cl({ token: tgt.token })).find('joined').me.acct, '초기화하면 옛 로그인은 모두 풀림');
+    const tl = await post('/auth/login', { name: '초기화대상', password: rs.temp }); assert(tl.ok && tl.mustChange === true, '임시 비밀번호로 로그인하면 새로 정해야 한다고 알려 줌');
+    assert((await cl({ token: tl.token })).find('must-change'), '새 비밀번호를 정하기 전에는 입장할 수 없음');
+    const np = await post('/auth/password', { token: tl.token, old: rs.temp, new: 'after-reset-pass-1' }); assert(np.ok, '임시 비밀번호로 새 비밀번호를 정함');
+    assert((await cl({ token: np.token })).find('joined')?.me.acct, '새 비밀번호를 정하면 입장됨');
+    mgc.send({ t: 'acct-ban', uid: tuid, on: true }); await wait(300);
+    assert((await cl({ token: np.token })).find('banned'), '계정 밴: 그 계정은 들어올 수 없음');
+    mgc.send({ t: 'acct-ban', uid: tuid, on: false }); await wait(300);
+    assert((await cl({ token: np.token })).find('joined'), '계정 밴을 풀면 다시 들어옴');
+    mgc.send({ t: 'acct-delete', uid: tuid });
+    assert((await until(() => mgc.find('acct-deleted'), '삭제 응답')).uid === tuid, '호스트가 계정을 삭제함');
+    assert.equal((await post('/auth/login', { name: '초기화대상', password: 'after-reset-pass-1' })).status, 401, '삭제된 계정으로는 로그인되지 않음');
+    await bye();
+
+    // ---- 가입 시도가 너무 많으면 막힘 (마지막: 이 IP의 가입 횟수를 모두 쓴다) ----
+    let hit = 0;
+    for (let i = 0; i < 80 && !hit; i++) if ((await signup('도배' + i, { code: 'wrong' })).status === 429) hit = i;
+    assert(hit > 0, '같은 IP에서 가입을 너무 많이 시도하면 막힘');
+  } finally { sv.kill(); fs.rmSync(STATE + '.acct', { force: true }); }
+}
+
+// 2.0 첫 시작: 옛 저장 파일은 백업하고 새로 시작한다. 관리자·가입 코드는 설정 파일이 기준이다. 서버를 껐다 켜며 확인한다
+async function migrationCheck() {
+  const port = PORT + 950, file = STATE + '.mig', dir = path.dirname(file), baseName = path.basename(file);
+  fs.writeFileSync(file, JSON.stringify({ hostKey: 'old-host-key', salt: 'old-salt', bans: [{ id: 'b1', type: 'cid', value: 'x', label: '옛밴' }], vapid: { publicKey: 'old-pub', privateKey: 'old-priv' },
+    members: { aaaaaaaaaaaa: { name: '옛사람' } }, dms: { 'aaaaaaaaaaaa~bbbbbbbbbbbb': [{ id: '1', from: 'aaaaaaaaaaaa', to: 'bbbbbbbbbbbb', text: '옛 쪽지', ts: Date.now() }] }, subs: { aaaaaaaaaaaa: [{ endpoint: 'https://x', keys: {}, prefs: {} }] }, blocks: {}, cleared: {} }));
+  const run = (over = {}, drop = []) => { const e = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: file, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), ...over }; for (const k of drop) delete e[k]; return spawn(process.execPath, ['server.js'], { cwd: __dirname, env: e, stdio: 'ignore' }); };
+  const stop = async (s) => { s.kill(); await wait(600); };
+  let sv = run();
+  try {
+    await wait(1500);
+    const baks = fs.readdirSync(dir).filter((x) => x.startsWith(baseName + '.bak-'));
+    assert(baks.length === 1 && JSON.parse(fs.readFileSync(path.join(dir, baks[0]), 'utf8')).hostKey === 'old-host-key', '옛 저장 파일이 .bak 으로 백업됨 (지워지지 않음)');
+    const now = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert(now.schema === 2 && !now.hostKey && !now.salt && !Object.keys(now.dms).length && !Object.keys(now.subs).length && !now.bans.length && !Object.keys(now.members).length && now.vapid.publicKey !== 'old-pub', '쪽지, 푸시 구독, 밴, 호스트 키, 푸시 키가 새로 시작됨');
+    const ad = await api('/auth/login', { name: '관리자', password: 'admin-pass-1' }, { port }); assert(ad.ok, '관리자가 설정 파일대로 만들어짐');
+    assert(!fs.readFileSync(file, 'utf8').includes('admin-pass-1'), '저장 파일에 관리자 비밀번호 원문이 없음');
+    await stop(sv);
+    assert.equal(fs.readdirSync(dir).filter((x) => x.startsWith(baseName + '.bak-')).length, 1, '이미 새 형식이면 다시 백업하지 않음');
+
+    // 설정 파일이 기준: 관리자 비밀번호를 바꾸고 다시 켜면 옛 비밀번호와 옛 로그인이 모두 무효
+    sv = run({ ADMIN_PASSWORD: 'admin-pass-2' }); await wait(1500);
+    assert.equal((await api('/auth/login', { name: '관리자', password: 'admin-pass-1' }, { port })).status, 401, '바뀐 설정에서는 옛 관리자 비밀번호가 안 됨');
+    assert(!(await (async () => { const c = client('mig-cid-000001', 'x', { token: ad.token }, { port }); await c.open; await wait(300); return c.find('joined').me.acct; })()), '옛 관리자 로그인(토큰)은 풀림');
+    const ad2 = await api('/auth/login', { name: '관리자', password: 'admin-pass-2' }, { port }); assert(ad2.ok, '새 비밀번호로 로그인됨');
+    await stop(sv);
+
+    // 관리자 설정을 빼면 관리자가 아니다 / 가입 코드가 없으면 가입이 닫혀 있다
+    sv = run({}, ['ADMIN_NAME', 'ADMIN_PASSWORD', 'SIGNUP_CODE']); await wait(1500);
+    const c = client('mig-cid-000002', 'x', { token: (await api('/auth/login', { name: '관리자', password: 'admin-pass-2' }, { port })).token }, { port }); await c.open; await wait(300);
+    assert(c.find('joined').me.acct && !c.find('joined').me.admin, '설정에서 관리자를 빼면 그 계정은 일반 계정이 됨');
+    assert.equal((await (await fetch(`http://localhost:${port}/auth/status`)).json()).signupOpen, false, '가입 코드가 없으면 가입이 닫혀 있다고 알림');
+    assert.equal((await api('/auth/signup', { name: '새사람', password: 'some-password-1', code: '' }, { port })).error, 'closed', '가입 코드가 없으면 가입할 수 없음');
+    c.send({ t: 'bye' });
+  } finally { sv.kill(); for (const x of fs.readdirSync(dir)) if (x.startsWith(baseName)) fs.rmSync(path.join(dir, x), { force: true }); }
 }
 
 // 폰·태블릿은 화면이 꺼져도 PC보다 훨씬 오래 방에 남는다 (알림 확인하고 돌아올 시간). PC 1.5초, 폰 4.5초로 줄여서 시험
@@ -458,8 +794,8 @@ async function resumeCheck() {
   assert(!thief.find('joined').resumed, '비밀 값을 알아도 cid가 다르면 이어받지 못함');
 
   // 강퇴는 유예 없이 바로 나감 (끊긴 것과 달리 자리를 남겨 두지 않는다)
-  const hostAgain = client('host-cid-0001', '호스트', { hostKey: hostKeyForTests }); await hostAgain.open; await wait(200);
-  assert(hostAgain.find('joined').me.host, '호스트 키로 다시 호스트로 접속');
+  const hostAgain = mainHost; // main()의 호스트는 아직 방에 있다
+  assert(!hostAgain.closed, '호스트가 방에 남아 있음');
   const k = client('kick-cid-0000001', '강퇴대상'); await k.open; await wait(200);
   const kid = k.find('joined').me.id; obs.clear();
   hostAgain.send({ t: 'ban', id: kid, mode: 'kick' });
@@ -492,7 +828,7 @@ const fake = {
 async function uploadCheck() {
   const base = 'http://localhost:' + PORT;
   const post = (body, token, type = 'application/octet-stream') => fetch(base + '/upload', { method: 'POST', headers: { 'X-Token': token ?? '', 'Content-Type': type }, body });
-  const u = client('up-cid-000000001', '업로더'); await u.open; await wait(300);
+  const u = client('up-cid-000000001', '업로더', { acct: true }); await u.open; await wait(300);
   const token = u.find('joined').upload;
   assert(typeof token === 'string' && token.length >= 16, '입장하면 업로드 토큰을 받음');
 
@@ -542,7 +878,7 @@ async function uploadCheck() {
   assert(cm2.text === '설명' && cm2.media.w === undefined, '말이 안 되는 크기 값은 버림');
 
   // 쪽지에 첨부 + 푸시 문구
-  const target = client('t-cid-00000000001', '받는이'); await target.open; await wait(300);
+  const target = client('t-cid-00000000001', '받는이', { acct: true }); await target.open; await wait(300);
   const tuid = target.find('joined').me.uid; target.clear();
   target.send({ t: 'push-sub', sub: { endpoint: 'https://push.example.test/up', keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) } }, prefs: { dm: true, spoof: 'off' } }); await until(() => target.find('push-ok'), '구독');
   target.send({ t: 'vis', v: false }); await wait(200); sink.hits.length = 0; await wait(450);
@@ -552,7 +888,7 @@ async function uploadCheck() {
   await until(() => sink.hits.length, '푸시');
   assert.equal(sink.hits[0].payload.body, '(사진)', '푸시에는 "(사진)"이라고만 나옴');
   target.ws.close(); await wait(200);
-  const t2 = client('t-cid-00000000001', '받는이'); await t2.open; await wait(300);
+  const t2 = client('t-cid-00000000001', '받는이', { acct: true }); await t2.open; await wait(300);
   assert.equal(t2.find('joined').inbox[0].last.text, '(사진)', '목록 미리보기도 "(사진)"');
   for (const c of [u, q, o, t2]) c.ws.close();
 }
@@ -581,7 +917,7 @@ async function purgeCheck() {
 // config.env: 주석, 따옴표, 윈도우 줄바꿈(CRLF)을 읽고, 이미 있는 환경변수가 우선하는지, 정상 종료 시 접속자에게 알리는지
 async function configCheck() {
   const port = PORT + 600, file = path.join(os.tmpdir(), `cfg-${Date.now()}.env`);
-  fs.writeFileSync(file, ['# 주석', 'PORT=' + (port + 1), 'HOST=127.0.0.1', 'TURN_URL="cfg.example.com:3478"', 'ICE_SERVERS=[{"urls":"relay.example.com:3478","username":"u","credential":"c"},{"urls":["turns:relay.example.com:5349","stun:relay.example.com:3478"]}]', "TURN_SECRET='cfg-secret'", '', 'STATE_FILE=' + STATE + '.cfg'].join('\r\n'));
+  fs.writeFileSync(file, ['# 주석', 'PORT=' + (port + 1), 'HOST=127.0.0.1', 'TURN_URL="cfg.example.com:3478"', 'AUTH_HOST=127.0.0.1', 'AUTH_ALLOW_HTTP=1', 'SIGNUP_CODE=cfg-code', 'ICE_SERVERS=[{"urls":"relay.example.com:3478","username":"u","credential":"c"},{"urls":["turns:relay.example.com:5349","stun:relay.example.com:3478"]}]', "TURN_SECRET='cfg-secret'", '', 'STATE_FILE=' + STATE + '.cfg'].join('\r\n'));
   const env = { ...process.env, CONFIG_FILE: file, PORT: String(port) }; // PORT는 환경변수가 이기고
   delete env.TURN_URL; delete env.TURN_SECRET; delete env.HOST; delete env.STATE_FILE; // 나머지는 파일에서 읽어야 함
   const s = spawn(process.execPath, ['server.js'], { cwd: __dirname, env, stdio: 'ignore' });
@@ -592,7 +928,9 @@ async function configCheck() {
     const ws = new WebSocket(`ws://127.0.0.1:${port}`); const msgs = [];
     ws.on('message', (d) => msgs.push(JSON.parse(d)));
     await new Promise((r) => ws.on('open', r));
-    ws.send(JSON.stringify({ t: 'join', name: '설정', cid: 'cfg-cid-0000001' })); await wait(300);
+    const su = await (await fetch(`http://127.0.0.1:${port}/auth/signup`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: '설정', password: 'cfg-pass-12345', code: 'cfg-code' }) })).json();
+    assert(su.ok, 'config.env의 SIGNUP_CODE·AUTH_HOST로 가입이 열림');
+    ws.send(JSON.stringify({ t: 'join', name: '설정', cid: 'cfg-cid-0000001', token: su.token })); await wait(300);
     const ice = msgs.find((m) => m.t === 'joined').ice;
     assert.deepEqual(ice.find((x) => x.credential && x.username !== 'u')?.urls, ['turn:cfg.example.com:3478'], '따옴표가 벗겨지고 CRLF 파일도 읽히고, TURN_URL에 turn: 이 없으면 붙여 줌');
     assert.deepEqual(ice.find((x) => x.username === 'u').urls, ['turn:relay.example.com:3478'], 'ICE_SERVERS에 turn: 이 없으면 붙여 줌(없으면 브라우저가 WebRTC를 통째로 거부)');
@@ -613,6 +951,6 @@ async function configCheck() {
 }
 
 sinkServer.listen(PORT + 300, '127.0.0.1');
-const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', RESUME_GRACE_MOBILE_MS: '4500', AWAY_MS: '500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
-wait(1000).then(main).then(dmFullCheck).then(nameCheck).then(dmOnlyCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
+const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', RESUME_GRACE_MOBILE_MS: '4500', AWAY_MS: '500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
+wait(1000).then(main).then(dmFullCheck).then(nameCheck).then(dmOnlyCheck).then(hostCheck).then(accountCheck).then(migrationCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
   .finally(() => { sinkServer.close(); srv.kill(); fs.rmSync(STATE, { force: true }); process.exit(); });

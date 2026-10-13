@@ -54,6 +54,8 @@ fs.mkdirSync(OUT, { recursive: true });
     await new Promise((r) => guest.on('open', r));
     guest.send(JSON.stringify({ t: 'join', name: '지나가던 코끼리', cid: 'guest-cid-000001', color: '#6ee7a8' }));
     await wait(400);
+    // 대기열에는 호스트(맨 처음 들어온 '하늘')가 허락한 사람만 올릴 수 있다
+    await js(`send({ t: 'queue-grant', id: users.find((u) => u.name === '지나가던 코끼리').id, on: true })`); await wait(300);
     for (const v of ['jNQXAC9IVRw', 'dQw4w9WgXcQ']) { guest.send(JSON.stringify({ t: 'queue-add', videoId: v })); await wait(900); }
     for (const t of ['안녕하세요! 오늘 같이 볼 영상 올릴게요', '조회수 1,234,567,890회짜리 영상인데 제목이 아주아주아주아주아주아주 길어서 줄바꿈이 잘 되는지도 같이 봐야 해요']) { guest.send(JSON.stringify({ t: 'chat', text: t })); await wait(400); }
     await wait(3500);
@@ -105,7 +107,7 @@ fs.mkdirSync(OUT, { recursive: true });
     await js(`document.querySelector('#settingsBtn').click()`); await wait(400);
     await shot('d-settings.png');
     const dlg = await js(`(() => { const d = document.querySelector('#settings'); const b = d.getBoundingClientRect(); return { open: d.open, w: b.width, h: b.height, vh: innerHeight, cards: d.querySelectorAll('.tc').length }; })()`);
-    check(dlg.open && dlg.cards === 15, `설정 창이 열리고 테마 카드 15개 (${dlg.cards}개)`);
+    check(dlg.open && dlg.cards === 17, `설정 창이 열리고 테마 카드 17개 (${dlg.cards}개)`);
     check(dlg.h <= dlg.vh, `설정 창이 화면 안에 들어옴 (${Math.round(dlg.h)} / ${dlg.vh})`);
     await js(`document.querySelector('#settings').close()`);
     const tone = (sel) => js(`(() => { const b = document.querySelector('${sel}'); const c = getComputedStyle(b); return { bg: c.backgroundColor, fg: c.color, cls: b.className }; })()`);
@@ -141,7 +143,8 @@ fs.mkdirSync(OUT, { recursive: true });
         const last = [...d.querySelectorAll('.dlg-b section')].pop();
         res.lastReachable = vis(last.querySelector('button, input, select') || last);
         b.scrollTop = 0;
-        res.unreachable = [...d.querySelectorAll('.dlg-b h3')].filter((h) => { h.scrollIntoView({ block: 'center' }); return !vis(h); }).map((h) => h.textContent);
+        // 게스트에게는 숨기는 칸(알림, 계정 관리)은 닿을 필요가 없어서 뺀다
+        res.unreachable = [...d.querySelectorAll('.dlg-b h3')].filter((h) => !h.closest('[hidden]')).filter((h) => { h.scrollIntoView({ block: 'center' }); return !vis(h); }).map((h) => h.textContent);
         b.scrollTop = 0;
         return res;
       })()`);

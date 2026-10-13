@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 방 채팅 서버를 시작합니다 (Linux / macOS).
+# 시루 그룹챗 서버를 시작합니다 (Linux / macOS).
 #   실행:  ./start-linux.sh        (실행 권한이 없다면 한 번만: chmod +x start-linux.sh)
 #   설정:  config.example.env 를 config.env 로 복사해서 고치세요.   끄기: Ctrl+C
 set -euo pipefail

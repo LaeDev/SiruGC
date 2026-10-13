@@ -45,7 +45,7 @@ function ding() {
 }
 
 function dmInit(m) {
-  meUid = m.me.uid;
+  meUid = m.me.uid || null; // 게스트는 null
   dmPeers.clear(); dmThreads.clear(); dmOpenUid = null; dmBlocked = new Set(m.blocks || []);
   for (const c of m.inbox || []) dmPeers.set(c.uid, c);
   dmView('list'); dmRender();
@@ -61,7 +61,8 @@ function dmResync(m) {
 
 /* ---------- 화면 전환 ---------- */
 function dmView(name) { // 'list' | 'picker' | 'thread'
-  $('#dmListWrap').hidden = name !== 'list';
+  $('#dmListWrap').hidden = name !== 'list' || !meUid;
+  $('#dmGuest').hidden = !!meUid || name !== 'list';
   $('#dmPicker').hidden = name !== 'picker';
   $('#dmThread').hidden = name !== 'thread';
 }
@@ -78,7 +79,7 @@ function dmRender() {
     const blocked = dmBlocked.has(p.uid);
     btn.append(
       paintAvatar(el('span', { className: 'av' }), peerUser(p)),
-      el('span', { className: 'who' }, el('b', { textContent: p.name }), el('small', { textContent: (blocked ? '차단함 · ' : '') + (p.last.mine ? '나: ' : '') + p.last.text })),
+      el('span', { className: 'who' }, el('b', {}, p.name, p.prev ? el('small', { className: 'prev', textContent: ' 이전: ' + p.prev }) : ''), el('small', { textContent: (blocked ? '차단함 · ' : '') + (p.last.mine ? '나: ' : '') + p.last.text })),
       side);
     btn.setAttribute('aria-label', `${p.name}${blocked ? ' (차단함)' : ''}, ${p.unread ? `안 읽은 쪽지 ${p.unread}개, ` : ''}마지막 쪽지: ${p.last.text}`);
     ul.append(el('li', {}, btn));
@@ -89,12 +90,13 @@ function dmRender() {
 function renderThreadHeader() {
   const p = dmPeers.get(dmOpenUid), who = $('#dmWho'), blocked = dmBlocked.has(dmOpenUid);
   who.replaceChildren();
-  if (p) who.append(paintAvatar(el('span', { className: 'av' }), peerUser(p)), el('span', { textContent: p.name }), dmOnline(p.uid) ? el('span', { className: 'on', textContent: '접속 중' }) : '');
+  if (p) who.append(paintAvatar(el('span', { className: 'av' }), peerUser(p)), el('span', { textContent: p.name }), p.prev ? el('small', { className: 'prev', textContent: '이전: ' + p.prev }) : '', dmOnline(p.uid) ? el('span', { className: 'on', textContent: '접속 중' }) : '');
   const b = $('#dmBlock');
-  b.setAttribute('aria-label', blocked ? '차단 해제' : '이 사람 차단'); b.title = b.getAttribute('aria-label'); b.classList.toggle('stop', blocked);
+  b.textContent = blocked ? '차단 해제' : '이 사람 차단'; b.classList.toggle('stop', blocked);
   $('#dmBlockedNote').hidden = !blocked;
-  $('#dmIn').disabled = $('#dmAttachBtn').disabled = blocked;
-  $('#dmIn').placeholder = blocked ? '차단한 사람에게는 보낼 수 없어요' : '쪽지를 입력하세요';
+  const closed = blocked || !!p?.deleted;
+  $('#dmIn').disabled = $('#dmAttachBtn').disabled = $('#dmForm button[type=submit]').disabled = closed;
+  $('#dmIn').placeholder = blocked ? '차단한 사람에게는 보낼 수 없어요' : p?.deleted ? '탈퇴한 사용자에게는 보낼 수 없어요' : '쪽지를 입력하세요';
 }
 
 /* ---------- 대화창 ---------- */
@@ -127,6 +129,7 @@ function dmDrawThread(msgs) {
   for (const msg of msgs) { const d = new Date(msg.ts).toDateString(); if (d !== lastDay) { lastDay = d; c.append(el('div', { className: 'sys day', textContent: dayLabel(msg.ts) })); } c.append(dmBubble(msg)); }
   if (!msgs.length) c.append(el('div', { className: 'sys', textContent: '아직 주고받은 쪽지가 없어요. 첫 쪽지를 보내 보세요.' }));
   dmReceipt(); dmScroll();
+  c.querySelectorAll('.media img').forEach((im) => { if (!im.complete) im.addEventListener('load', dmScroll, { once: true }); });
 }
 function dmReceipt() { // 내가 보낸 마지막 쪽지가 읽혔는지
   $('#dmMsgs').querySelector('.rcpt')?.remove();
@@ -155,7 +158,12 @@ function dmMarkRead(uid) {
 // 쪽지 탭을 다시 열었을 때 (app.js의 showTab이 부른다)
 function dmShown() { if (dmOpenUid && !$('#dmThread').hidden) dmMarkRead(dmOpenUid); }
 
-$('#dmBack').onclick = () => { dmOpenUid = null; dmView('list'); dmRender(); };
+const dmMenu = (open) => { $('#dmMenu').hidden = !open; $('#dmMore').setAttribute('aria-expanded', open); };
+$('#dmMore').onclick = (e) => { e.stopPropagation(); dmMenu($('#dmMenu').hidden); };
+$('#dmMenu').addEventListener('click', () => dmMenu(false));
+document.addEventListener('click', (e) => { if (!e.target.closest('.menu-wrap')) dmMenu(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#dmMenu').hidden) { dmMenu(false); $('#dmMore').focus(); } });
+$('#dmBack').onclick = () => { dmMenu(false); dmOpenUid = null; dmView('list'); dmRender(); };
 $('#dmForm').onsubmit = (e) => {
   e.preventDefault();
   const text = $('#dmIn').value.trim();
@@ -204,7 +212,7 @@ Object.assign(handlers, {
       const c = $('#dmMsgs'), atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 80;
       if (!c.querySelector('.m')) c.replaceChildren(); // "아직 주고받은 쪽지가 없어요" 안내를 걷어 낸다
       if (!prev || new Date(prev.ts).toDateString() !== new Date(msg.ts).toDateString()) c.append(el('div', { className: 'sys day', textContent: dayLabel(msg.ts) }));
-      c.append(dmBubble(msg)); dmReceipt(); if (atEnd || mine) dmScroll();
+      c.append(dmBubble(msg)); dmReceipt(); if (atEnd || mine) { dmScroll(); c.lastElementChild.querySelectorAll('.media img').forEach((im) => { if (!im.complete) im.addEventListener('load', dmScroll, { once: true }); }); }
     }
     if (!mine) { if (viewing) { send({ t: 'dm-read', with: peerUid }); p.unread = 0; } else { p.unread = (p.unread || 0) + 1; ding(); } }
     dmRender();
@@ -213,7 +221,7 @@ Object.assign(handlers, {
     dmThreads.set(m.with, m.msgs);
     const p = dmPeers.get(m.with);
     if (p) {
-      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color, online: m.peer.online });
+      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color, online: m.peer.online, prev: m.peer.prev || '', deleted: m.peer.deleted });
       const last = m.msgs.at(-1);
       if (last) p.last = { text: lastText(last), ts: last.ts, mine: last.from === meUid }; else delete p.last; // 지운 뒤에는 목록 미리보기도 맞춘다
     }

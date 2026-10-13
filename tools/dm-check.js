@@ -4,6 +4,7 @@
 //   소리: 스피커 버튼이 영상·공유·음성을 모두 끄는지
 //   패닉: 버튼 / Esc 두 번 → 소리·마이크 끄기 + 화면 보호기 + 뒤 화면 잠금, 아무 키·클릭으로 해제, 소리는 꺼진 채 유지
 // 실행: node tools/dm-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
+const { AUTH_ENV, signup, loginJs } = require('./_auth');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -18,7 +19,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
 
 (async () => {
   const state = path.join(os.tmpdir(), `dm-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio',
     '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required', 'about:blank'], { stdio: 'ignore' });
@@ -40,7 +41,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000); };
+      const open = async () => { await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200); await js(loginJs(await signup(PORT, name))); await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000); };
       const key = async (k, code, vk) => { for (const type of ['keyDown', 'keyUp']) await call('Input.dispatchKeyEvent', { type, key: k, code, windowsVirtualKeyCode: vk }); };
       await open();
       return { ctx: browserContextId, js, call, key, open, shot: async (f) => fs.writeFileSync(f, Buffer.from((await call('Page.captureScreenshot', { format: 'png' })).result.data, 'base64')) };
@@ -76,7 +77,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await A.js(`document.title === '제목 없는 문서' && document.querySelector('link[rel=icon]').getAttribute('href') === '/icons/spoof-docs.png'`), '탭 제목과 아이콘이 문서 편집기로 위장됨');
     check(await A.js(`document.querySelector('#spoofPrev').innerText.includes('문서 편집기') && !document.querySelector('#spoofPrev').innerText.includes('에이')`), '미리보기에 가짜 이름만 보임');
     await A.js(`(() => { const c = document.querySelector('#tabSpoof'); c.checked = false; c.dispatchEvent(new Event('change')); })()`); await wait(200);
-    check(await A.js(`document.title === '방 채팅'`), '"탭도 바꾸기"를 끄면 탭 제목이 원래대로');
+    check(await A.js(`document.title === '시루 그룹챗'`), '"탭도 바꾸기"를 끄면 탭 제목이 원래대로');
     await A.js(`(() => { const c = document.querySelector('#tabSpoof'); c.checked = true; c.dispatchEvent(new Event('change')); const s = document.querySelector('#spoofSel'); s.value = 'calc'; s.dispatchEvent(new Event('change')); })()`); await wait(200);
     check(await A.js(`document.title === '계산기'`), '위장을 바꾸면 탭 제목도 바로 바뀜');
     check(await A.js(`JSON.parse(localStorage.notifPrefs).spoof === 'calc'`), '설정이 이 기기에 저장됨');
@@ -111,7 +112,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await A.js(`saverOn`), 'Esc를 빠르게 두 번 누르면 패닉');
     check(await A.js(`document.title === '새 탭'`), '위장을 안 쓰면 탭 제목이 평범한 "새 탭"으로 바뀜');
     await wait(600); await A.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 200, y: 200, button: 'left', clickCount: 1 }); await A.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 200, y: 200, button: 'left', clickCount: 1 }); await wait(300);
-    check(await A.js(`!saverOn && document.title === '방 채팅'`), '화면을 눌러도 해제되고 탭 제목이 원래대로');
+    check(await A.js(`!saverOn && document.title === '시루 그룹챗'`), '화면을 눌러도 해제되고 탭 제목이 원래대로');
     await A.js(`document.querySelector('#panicBtn').click()`); await wait(300);
     await A.js(`document.querySelector('#saver').dispatchEvent(new Event('pointerdown'))`); await wait(100);
     check(await A.js(`saverOn`), '(재확인) 켜자마자 눌러도 0.5초 동안은 유지');

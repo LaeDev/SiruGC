@@ -5,3 +5,4 @@ tmp/
 .env
 config.env
 uploads/
+state.json.bak-*

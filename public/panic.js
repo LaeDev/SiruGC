@@ -69,6 +69,7 @@ addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && 
 // Esc를 빠르게 두 번: 어디서든 패닉 (입력창에 글을 쓰던 중이어도)
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || e.repeat || saverOn) return;
+  if (document.querySelector('dialog[open]')) { lastEsc = 0; return; } // 창(설정, 로그인 …)을 Esc로 닫는 것은 패닉 Esc 두 번에 세지 않는다
   const now = Date.now();
   if (now - lastEsc < 600) { lastEsc = 0; panic(); } else lastEsc = now;
 });

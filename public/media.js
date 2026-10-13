@@ -39,7 +39,7 @@ function applySound() {
 
 /* ================= 같이 보기 (유튜브) ================= */
 // 방의 재생 시계는 계속 흐른다. 일시정지는 개인 것 → 다시 틀면 서버에 물어 방의 현재 위치로 맞춘다.
-let player = null, playerReady = false, ytWant = null, ytSuppress = 0, selfPaused = false, lastSync = 0, lastT = null, lastAt = 0;
+let seekNoteAt = 0, player = null, playerReady = false, ytWant = null, ytSuppress = 0, selfPaused = false, lastSync = 0, lastT = null, lastAt = 0;
 const ytId = (s) => (s.match(/(?:v=|youtu\.be\/|embed\/|shorts\/|live\/)([\w-]{11})/) || s.match(/^([\w-]{11})$/) || [])[1];
 const roomTime = () => (ytWant.playing ? ytWant.time + (Date.now() - ytWant.rcv) / 1000 : ytWant.time);
 
@@ -72,7 +72,7 @@ function syncYt(changed) {
   const s = ytWant;
   if (!playerReady || !s) return;
   ytSuppress = Date.now() + 1500; // 내가 내린 명령 때문에 생긴 이벤트는 서버로 되돌려 보내지 않음
-  if (changed || player.getVideoData().video_id !== s.videoId) {
+  if (changed || player.getVideoData?.()?.video_id !== s.videoId) { // 플레이어가 아직 영상 정보를 주지 못할 때도 예외 없이 처음부터 불러온다
     if (s.playing) player.loadVideoById({ videoId: s.videoId, startSeconds: roomTime() });
     else player.cueVideoById({ videoId: s.videoId, startSeconds: 0 });
     return;
@@ -99,9 +99,15 @@ setInterval(() => {
   const t = player.getCurrentTime(), now = Date.now();
   if (lastT !== null && now > ytSuppress) {
     const expected = lastT + ((now - lastAt) / 1000) * player.getPlaybackRate();
-    if (Math.abs(t - expected) > 2) { // 직접 위치를 옮겼다 → 모두에게 적용
-      ytWant = { ...ytWant, playing: true, time: t, rcv: now };
-      send({ t: 'yt-seek', time: t });
+    if (Math.abs(t - expected) > 2) { // 직접 위치를 옮겼다
+      if (isHost) { // 호스트의 이동은 모두에게 적용
+        ytWant = { ...ytWant, playing: true, time: t, rcv: now };
+        send({ t: 'yt-seek', time: t });
+      } else { // 그 밖의 사람은 방의 위치로 되돌린다 (영상 위치는 호스트만 바꿀 수 있다)
+        ytSuppress = now + 1500; player.seekTo(roomTime(), true); lastT = null;
+        if (now - seekNoteAt > 8000) { seekNoteAt = now; sys('영상 위치는 호스트만 바꿀 수 있어요.'); }
+        return;
+      }
     } else if (ytWant.playing && !selfPaused && Math.abs(t - roomTime()) > 4) syncYt(false); // 버퍼링 등으로 많이 어긋남
   }
   lastT = t; lastAt = now;
@@ -109,25 +115,26 @@ setInterval(() => {
 
 /* ================= 대기열 ================= */
 let queue = [];
-const canManage = (by) => isHost || by === me;
+const canManage = () => isHost; // 대기열 조작은 호스트(와 관리자)만. 올린 사람도 예외 없음
 const thumb = (id) => el('img', { className: 'thumb', src: `https://i.ytimg.com/vi/${id}/mqdefault.jpg`, alt: '', width: 96, height: 54, loading: 'lazy' });
 const iconBtn = (id, label, onclick) => {
   const b = el('button', { type: 'button', className: 'btn icon', title: label, onclick }, icon(id));
   b.setAttribute('aria-label', label); return b;
 };
 function renderQueue() {
+  [...$('#qForm').elements].forEach((e) => (e.disabled = !canQueue)); $('#qPerm').hidden = canQueue; // 호스트가 허락한 사람만 올릴 수 있다
   const cur = ytWant && !ytWant.ended ? ytWant : null;
   $('#now').hidden = !cur;
   if (cur) {
     $('#nowThumb').src = `https://i.ytimg.com/vi/${cur.videoId}/mqdefault.jpg`;
     $('#nowTitle').textContent = cur.title || cur.videoId;
     $('#nowBy').textContent = cur.byName ? `${cur.byName} 님이 올렸어요 · 지금 재생 중` : '지금 재생 중';
-    $('#nowSkip').hidden = !canManage(cur.by);
+    $('#nowSkip').hidden = !canManage();
   }
   const ul = $('#qList'); ul.replaceChildren();
   queue.forEach((q, i) => {
     const btns = el('div', { className: 'qbtns' });
-    if (canManage(q.by)) {
+    if (canManage()) {
       const grip = iconBtn('i-grip', '끌어서 순서 바꾸기', () => {}); grip.classList.add('grip');
       const up = iconBtn('i-up', '위로 옮기기', () => send({ t: 'queue-move', qid: q.qid, to: i - 1 })), down = iconBtn('i-down', '아래로 옮기기', () => send({ t: 'queue-move', qid: q.qid, to: i + 1 }));
       up.disabled = i === 0; down.disabled = i === queue.length - 1;
@@ -170,6 +177,7 @@ function dragToReorder(grip, li, q, ul) {
 $('#nowSkip').onclick = () => send({ t: 'yt-next' });
 $('#qForm').onsubmit = (e) => {
   e.preventDefault();
+  if (!canQueue) return;
   const id = ytId($('#qUrl').value.trim());
   $('#qMsg').textContent = id ? '' : '유튜브 링크를 알아볼 수 없어요. 주소 전체를 붙여 넣어 보세요.';
   if (!id) return;

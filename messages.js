@@ -1,10 +1,9 @@
 // 쪽지(DM)와 웹 푸시 알림. server.js에서 한 번 만들어 쓴다.
 //
-// 신원: 클라이언트가 브라우저에 보관하는 비밀 식별자(cid)는 서버 밖으로 나가지 않는다. 다른 사람에게 보이는 공개 번호(uid)는
-//       cid를 서버의 비밀 소금(room.salt)으로 해시한 값이다. uid는 알려져도 그것으로 남의 쪽지를 읽을 수 없다.
+// 신원: 쪽지는 로그인한 계정끼리만 주고받는다. 다른 사람에게 보이는 공개 번호(uid)는 계정의 무작위 번호이고, 알려져도
+//       그것으로 남의 쪽지를 읽을 수 없다(읽으려면 그 계정으로 로그인한 연결이어야 한다).
 // 저장: 쪽지는 서버(state.json)에 30일 보관한다 (오프라인인 사람에게도 전달하려면 저장이 필요하다).
 const webpush = require('web-push');
-const crypto = require('crypto');
 
 const KEEP_MS = 30 * 86400e3;
 const MAX_PER_CONV = 200, MAX_SUBS = 5, MAX_MEMBERS = 300;
@@ -24,7 +23,6 @@ const PUSH_HOST_OK = /(^|\.)(googleapis\.com|mozilla\.com|push\.apple\.com|notif
 module.exports = function createMessages({ room, send, newId, saveSoon, cleanMedia }) {
   webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'https://sirugc.kro.kr', room.vapid.publicKey, room.vapid.privateKey);
 
-  const uidOf = (cid) => crypto.createHmac('sha256', room.salt).update(cid).digest('hex').slice(0, 12);
   const convKey = (a, b) => [a, b].sort().join('~');
   const clientsOf = (uid) => [...room.clients.values()].filter((c) => c.uid === uid);
   const pub = ({ id, from, to, text, media, ts, read }) => ({ id, from, to, text, media, ts, read: !!read });
@@ -35,12 +33,13 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
   const label = (msg) => msg.text || (msg.media?.kind === 'video' ? '(동영상)' : '(사진)'); // 글 없이 첨부만 보낸 쪽지의 미리보기
   const peerInfo = (uid) => {
     const m = room.members[uid];
-    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, online: clientsOf(uid).some((c) => !c.ghost) }; // 방금 끊겨서 돌아오기를 기다리는 사람(ghost)은 접속 중으로 치지 않는다
+    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, deleted: m?.deleted || undefined, prev: m?.prev || '', online: clientsOf(uid).some((c) => !c.ghost) }; // 방금 끊겨서 돌아오기를 기다리는 사람(ghost)은 접속 중으로 치지 않는다
   };
 
   // 접속할 때 알려 둔다: 이름·프사·색을 기억해 두면 오프라인인 사람에게도 쪽지를 보낼 수 있다.
   function remember(ws) {
-    room.members[ws.uid] = { name: ws.name, avatar: ws.avatar, color: ws.color, seen: Date.now() };
+    if (!ws.uid) return; // 게스트는 쪽지를 쓰지 않으니 목록에 두지 않는다
+    room.members[ws.uid] = { name: ws.name, prev: ws.prev || '', avatar: ws.avatar, color: ws.color, seen: Date.now() };
     const uids = Object.keys(room.members);
     if (uids.length > MAX_MEMBERS) { // 쪽지 기록이 없는 가장 오래된 사람부터 잊는다
       const hasDm = new Set(Object.keys(room.dms).flatMap((k) => k.split('~')));
@@ -119,6 +118,7 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
     const text = String(m.text || '').trim().slice(0, 500), to = String(m.to || ''), now = Date.now();
     const media = cleanMedia ? cleanMedia(m.media) : null;
     if ((!text && !media) || to === ws.uid || !room.members[to] || now - (ws.lastDm || 0) < 400) return; // 빈 글, 나에게, 모르는 사람, 도배
+    if (room.members[to].deleted) return send(ws, { t: 'dm-error', msg: '탈퇴한 사용자에게는 쪽지를 보낼 수 없어요.' });
     if (blocksOf(ws.uid).includes(to)) return send(ws, { t: 'dm-error', msg: '차단한 사람에게는 쪽지를 보낼 수 없어요. 차단을 풀어 주세요.' });
     ws.lastDm = now;
     // 상대가 나를 차단했으면: 나에게는 보낸 것처럼 보이지만(차단 사실을 드러내지 않으려고) 상대에게는 전달도 알림도 가지 않는다
@@ -133,7 +133,19 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
   }
 
   // 메시지 처리: server.js의 switch에서 모르는 종류를 넘겨 받는다. 처리했으면 true.
+  // 계정을 지웠을 때: 쪽지 기록은 상대를 위해 남기고, 이름은 "탈퇴한 사용자"로 바꾼다. 푸시 구독·차단·정리 기록은 지운다
+  function forget(uid) {
+    room.members[uid] = { name: '탈퇴한 사용자', avatar: null, color: null, deleted: true, seen: Date.now() };
+    delete room.subs[uid]; delete room.blocks[uid];
+    for (const k of Object.keys(room.cleared)) if (k.startsWith(uid + '>')) delete room.cleared[k];
+    saveSoon();
+  }
+
   function handle(ws, m) {
+    if (!ws.uid && m.t !== 'vis') { // 쪽지와 알림은 로그인한 사람만
+      send(ws, { t: 'dm-error', msg: '쪽지는 로그인한 사람끼리만 주고받을 수 있어요.' });
+      return true;
+    }
     switch (m.t) {
       case 'dm': sendDm(ws, m); return true;
       case 'dm-history': {
@@ -181,7 +193,7 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
       }
       case 'dm-members': { // 새 쪽지를 시작할 사람 고르기: 접속한 적 있는 모든 사람 (접속 중인 사람이 먼저)
         const mine = new Set(blocksOf(ws.uid));
-        const list = Object.keys(room.members).filter((u) => u !== ws.uid).map((u) => ({ ...peerInfo(u), blocked: mine.has(u) }))
+        const list = Object.keys(room.members).filter((u) => u !== ws.uid && !room.members[u].deleted).map((u) => ({ ...peerInfo(u), blocked: mine.has(u) }))
           .sort((a, b) => b.online - a.online || a.name.localeCompare(b.name, 'ko'));
         send(ws, { t: 'members', list });
         return true;
@@ -205,5 +217,5 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
 
   prune();
   setInterval(prune, 3600e3).unref();
-  return { SPOOFS, uidOf, remember, inboxFor, blocksOf, handle, avatarOf, peerInfo };
+  return { SPOOFS, remember, forget, inboxFor, blocksOf, handle, avatarOf, peerInfo };
 };

@@ -17,8 +17,9 @@ function deviceKind() {
 }
 const icon = (id) => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'i'); s.setAttribute('aria-hidden', 'true'); s.innerHTML = `<use href="#${id}"/>`; return s; };
 
-let wantDm = false, dmOnly = false; // 입장 화면에서 '쪽지함' 버튼을 눌렀는지 / 서버가 그렇게 받아 주었는지
-let ws, me, isHost = false, sharerId = null, users = [], ended = false, joined = false, openUser = null;
+let profileEdited = false, wantDm = false, dmOnly = false; // 입장 화면에서 '쪽지함' 버튼을 눌렀는지 / 서버가 그렇게 받아 주었는지
+let ws, me, isHost = false, canQueue = false, // isHost: 호스트 또는 관리자(호스트의 일을 할 수 있음) / canQueue: 대기열에 영상을 올릴 수 있음
+   sharerId = null, users = [], ended = false, joined = false, openUser = null;
 // 의미색 버튼: go(초록) / blue(파랑) / stop(빨강) 중 하나만 켠다
 const setTone = (b, tone) => ['go', 'blue', 'stop'].forEach((c) => b.classList.toggle(c, c === tone));
 const send = (m) => { if (ws?.readyState !== 1) return false; ws.send(JSON.stringify(m)); return true; };
@@ -77,7 +78,8 @@ function refresh(pop) {
   $('#tabPhoto').setAttribute('aria-selected', photo); $('#tabPhoto').tabIndex = photo ? 0 : -1;
   $('#panEmoji').hidden = photo; $('#panPhoto').hidden = !photo;
   $('#photoClear').hidden = !profile.photo;
-  document.querySelectorAll('#emojis button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.e === profile.emoji));
+  document.querySelectorAll('#emojis button').forEach((b) => { b.setAttribute('aria-pressed', b.dataset.e === profile.emoji); b.tabIndex = b.dataset.e === profile.emoji ? 0 : -1; });
+  if (!$('#emojis button[tabindex="0"]')) $('#emojis button').tabIndex = 0;
   document.querySelectorAll('#swatches .sw').forEach((b) => b.setAttribute('aria-pressed', b.dataset.c === profile.color));
   $('#colorIn').value = profile.color; $('#colorHex').textContent = profile.color.toUpperCase();
   set('profile', JSON.stringify(profile));
@@ -96,6 +98,17 @@ for (const [c, name] of SWATCHES) {
   $('#swatches .picker').before(b);
 }
 $('#colorIn').oninput = (e) => { profile.color = e.target.value; refresh(); };
+$('#emojis').setAttribute('role', 'group'); $('#emojis').setAttribute('aria-label', '이모티콘 (방향키로 움직여요)');
+$('#emojis').addEventListener('keydown', (e) => {
+  const keys = { ArrowLeft: -1, ArrowRight: 1, Home: 'home', End: 'end', ArrowUp: 'up', ArrowDown: 'down' };
+  if (!(e.key in keys)) return;
+  const btns = [...$('#emojis').querySelectorAll('button')], i = btns.indexOf(document.activeElement);
+  if (i < 0) return;
+  const cols = btns.filter((b) => b.offsetTop === btns[0].offsetTop).length || 1, k = keys[e.key];
+  const n = k === 'home' ? 0 : k === 'end' ? btns.length - 1 : k === 'up' ? i - cols : k === 'down' ? i + cols : i + k;
+  if (n < 0 || n >= btns.length) return;
+  e.preventDefault(); btns[n].focus(); btns[n].click();
+});
 $('#emojiIn').oninput = (e) => {
   // 입력창에 이모티콘이 하나라도 있으면 첫 글자(그래핌)만 쓴다
   const chars = Intl.Segmenter ? [...new Intl.Segmenter().segment(e.target.value)].map((s) => s.segment) : [...e.target.value];
@@ -124,22 +137,29 @@ $('#photoFile').onchange = async (e) => {
 
 /* ================= 입장 / 연결 ================= */
 $('#nameIn').value = get('name') || '';
+$('.skip').setAttribute('href', '#nameIn'); $('.skip').textContent = '닉네임 입력으로 건너뛰기';
 refresh();
 // 입장 버튼은 둘: '입장하기'(방)와 '쪽지함'(방에 들어가지 않고 쪽지만). 어느 쪽을 눌렀는지는 wantDm에 담는다
 const setJoinBusy = (on) => { $('#enter').disabled = $('#inboxBtn').disabled = on; if (!on) { $('#enter').textContent = '입장하기'; $('#inboxBtn').lastChild.textContent = '쪽지함'; } else (wantDm ? $('#inboxBtn').lastChild : $('#enter')).textContent = '들어가는 중'; };
 $('#enter').onclick = () => { wantDm = false; };
-$('#inboxBtn').onclick = () => { wantDm = true; $('#joinForm').requestSubmit(); };
+$('#inboxBtn').onclick = () => {
+  if (!loggedIn()) return openAuth('login', '쪽지함은 로그인한 사람만 쓸 수 있어요.'); // 쪽지는 로그인한 계정끼리만
+  wantDm = true; $('#joinForm').requestSubmit();
+};
+// 프로필 꾸미기: 넓은 화면에서는 펼쳐 두고, 폰에서는 접어 둔다. 직접 고쳤을 때만 계정의 프로필을 바꾼다
+$('#makeWrap').open = matchMedia('(min-width:901px)').matches;
+for (const ev of ['click', 'input']) $('#makeWrap .make').addEventListener(ev, () => { profileEdited = true; });
 
 // 서버의 닉네임 규칙과 같다 (서버가 최종 판단)
 const NICK_RE = /^[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9 _.\-]+$/, NICK_LETTER = /[\uAC00-\uD7A3\u3131-\u3163\u3165-\u318EA-Za-z0-9]/;
 const NAME_HELP = '닉네임에는 한글, 영문, 숫자, 공백, _ - . 만 쓸 수 있어요.';
 $('#joinForm').onsubmit = (e) => {
   e.preventDefault();
-  const name = $('#nameIn').value.replace(/\s+/g, ' ').trim();
+  const name = loggedIn() ? get('acctName') : $('#nameIn').value.replace(/\s+/g, ' ').trim();
   if (!name) { $('#joinMsg').textContent = '닉네임을 입력해 주세요.'; return $('#nameIn').focus(); }
-  if (!NICK_RE.test(name) || !NICK_LETTER.test(name)) { $('#joinMsg').textContent = NAME_HELP; return $('#nameIn').focus(); }
+  if (!loggedIn() && (!NICK_RE.test(name) || !NICK_LETTER.test(name))) { $('#joinMsg').textContent = NAME_HELP; return $('#nameIn').focus(); }
   $('#joinMsg').textContent = '';
-  set('name', name);
+  if (!loggedIn()) set('name', name);
   setJoinBusy(true);
   connect(name);
 };
@@ -158,14 +178,17 @@ function sendPaced(kind, msg) {
   return true;
 }
 // 연결이 끊겨도 서버가 살아 있으면 화면을 그대로 두고 조용히 다시 연결한다. 서버가 응답하지 않을 때만 '서버가 꺼졌습니다'를 보여 준다.
-let nameTaken = '', nameBad = false, joinName = '', resumeInfo = null, reconnecting = false, firstJoined = false, downSince = 0, probeFails = 0, retryN = 0, attemptTimer = 0, hbTimer = 0, lastHeard = 0, pingAt = 0, tickAt = 0, netTimer = 0;
+let joinNote = '', nameTaken = '', nameBad = false, joinName = '', resumeInfo = null, reconnecting = false, firstJoined = false, downSince = 0, probeFails = 0, retryN = 0, attemptTimer = 0, hbTimer = 0, lastHeard = 0, pingAt = 0, tickAt = 0, netTimer = 0;
 const BUILD = document.querySelector('meta[name=build]')?.content || ''; // 이 화면이 받은 파일의 버전 (서버가 index.html에 심어 준다)
 { const v = $('#verNote'); if (v) v.textContent = '화면 버전 ' + (BUILD || '알 수 없음') + ' · 기능이 안 보이면 새로고침(앱이면 완전히 닫았다 다시 열기)'; }
-const showNet = (t) => { const n = $('#net'); n.textContent = t; n.hidden = false; };
+// 끊김·새 버전 띠는 헤더 아래에 뜬다 (폰에서는 헤더가 두 줄이라 높이를 재서 정한다)
+const setTopH = () => { const h = $('.top')?.offsetHeight; document.documentElement.style.setProperty('--top-h', (h ? h + 8 : 12) + 'px'); };
+const showNet = (t) => { const n = $('#net'); setTopH(); n.textContent = t; n.hidden = false; };
 const hideNet = () => { clearTimeout(netTimer); $('#net').hidden = true; };
 // 서버가 새 버전이라고 알려 오면(열어 둔 탭·설치한 앱이 옛 화면일 때) 새로고침 버튼을 보여 준다. 음성·공유를 쓰는 중에 멋대로 새로고침하지는 않는다.
 function offerUpdate() {
   if ($('#upd')) return;
+  setTopH();
   document.body.append(el('div', { id: 'upd', role: 'status' }, '새 버전이 나왔어요. 새로고침하면 새 기능이 적용돼요.',
     el('button', { className: 'btn primary', type: 'button', textContent: '새로고침', onclick: () => location.reload() })));
 }
@@ -176,7 +199,7 @@ function connect(name) {
   if (prev) { prev.onopen = prev.onmessage = prev.onclose = null; try { prev.close(4000, 'replaced'); } catch {} }
   const sock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host);
   ws = sock;
-  sock.onopen = () => send({ t: 'join', name, avatar: currentAvatar(), color: profile.color, device: deviceKind(), dmOnly: wantDm || undefined, cid, hostKey: get('hostKey'), resume: resumeInfo });
+  sock.onopen = () => send({ t: 'join', name, avatar: currentAvatar(), color: profile.color, device: deviceKind(), dmOnly: wantDm || undefined, cid, token: get('tok') || undefined, profileEdited: profileEdited || undefined, resume: resumeInfo });
   sock.onmessage = (e) => { lastHeard = Date.now(); handle(JSON.parse(e.data)); };
   sock.onclose = () => {
     if (ws !== sock || ended) return; // 이미 새 연결로 바뀐 옛 소켓의 이벤트는 무시
@@ -184,9 +207,9 @@ function connect(name) {
     if (joined && nameTaken) return location.reload(); // 끊긴 사이에 내 닉네임을 다른 사람이 가져갔다: 입장 화면으로 돌아가 다시 정한다
     if (joined) return reconnectSoon();
     setJoinBusy(false);
-    $('#joinMsg').textContent = nameBad ? NAME_HELP : nameTaken ? `"${nameTaken}" 닉네임은 지금 방에 있는 다른 사람이 쓰고 있어요. 다른 닉네임으로 들어와 주세요.` : '서버에 연결하지 못했어요. 잠시 뒤 다시 눌러 주세요.';
-    if (nameTaken || nameBad) $('#nameIn').focus();
-    nameTaken = ''; nameBad = false;
+    $('#joinMsg').textContent = joinNote || (nameBad ? NAME_HELP : nameTaken ? `"${nameTaken}" 닉네임은 지금 방에 있는 다른 사람이 쓰고 있어요. 다른 닉네임으로 들어와 주세요.` : '서버에 연결하지 못했어요. 잠시 뒤 다시 눌러 주세요.');
+    if ((nameTaken || nameBad) && !joinNote) $('#nameIn').focus();
+    joinNote = ''; nameTaken = ''; nameBad = false;
   };
 }
 
@@ -263,7 +286,7 @@ function stopEverything() {
 // 끊겼다가 같은 세션으로 돌아왔을 때: 방 상태만 새로 맞추고 열려 있는 것(음성, 공유, 대화창)은 건드리지 않는다
 function applyResume(m, wasReconnecting) {
   uploadToken = m.upload || uploadToken;
-  isHost = m.me.host; me = m.me.id; users = m.users.concat(m.me);
+  isHost = !!(m.me.host || m.me.admin); canQueue = !!m.me.canQueue; me = m.me.id; users = m.users.concat(m.me);
   $('#banBox').hidden = !isHost; renderBans(m.bans); renderUsers();
   voiceList = m.voice || []; syncVoicePeers(); renderVoice();
   queue = m.queue || []; renderQueue();
@@ -307,6 +330,8 @@ Object.assign(handlers, {
   joined(m) {
     clearTimeout(attemptTimer);
     resumeInfo = { id: m.me.id, secret: m.resume }; uploadToken = m.upload || '';
+    if (m.token) set('tok', m.token); // 서버가 3일마다 바꿔 주는 새 로그인 토큰
+    if (m.me.acct) { set('acctName', m.me.name); myPrev = m.me.prev || ''; acctUi(); }
     const wasReconnecting = reconnecting;
     reconnecting = false; hideNet(); startHeartbeat();
     if (m.build && BUILD && m.build !== BUILD) offerUpdate();
@@ -317,10 +342,10 @@ Object.assign(handlers, {
     }
     firstJoined = true;
     joined = true;
-    me = m.me.id; isHost = m.me.host; users = m.users.concat(m.me);
-    if (m.hostKey) set('hostKey', m.hostKey);
+    me = m.me.id; isHost = !!(m.me.host || m.me.admin); canQueue = !!m.me.canQueue; users = m.users.concat(m.me);
     dmOnly = !!m.dmOnly; // 서버가 쪽지만 쓰는 연결로 받아 줬을 때만 (옛 서버라면 방으로 들어온 것이니 방 화면 그대로)
     document.body.classList.toggle('dm-only', dmOnly); $('#toRoom').hidden = !dmOnly;
+    $('.skip').setAttribute('href', dmOnly ? '#dmNew' : '#chatIn'); $('.skip').textContent = dmOnly ? '새 쪽지 버튼으로 건너뛰기' : '채팅 입력으로 건너뛰기';
     $('#join').hidden = true; $('#app').hidden = false;
     $('#banBox').hidden = !isHost;
     renderBans(m.bans); renderUsers();
@@ -331,7 +356,7 @@ Object.assign(handlers, {
     if (m.sharer) { sharerId = m.sharer; requestShare(); }
     renderStage();
     if (dmOnly) { $('.logo .t').textContent = '쪽지함'; showTab('dm'); return; } // 방 안내와 채팅 입력 칸은 쓰지 않는다
-    sys(isHost ? '이 방의 호스트예요. 참가자 탭에서 사람을 누르면 쪽지·강퇴·밴 메뉴가 열려요.' : '입장했어요. 참가자 탭에서 사람을 누르면 쪽지를 보낼 수 있어요.');
+    sys(isHost ? '이 방의 호스트예요. 참가자 탭에서 사람을 누르면 대기열 허락·호스트 넘기기·강퇴·밴 메뉴가 열려요.' : m.me.acct ? '입장했어요. 참가자 탭에서 사람을 누르면 쪽지를 보낼 수 있어요.' : '입장했어요. 쪽지는 로그인한 사람끼리만 주고받을 수 있어요. (설정 → 계정)');
     if (matchMedia('(pointer:fine)').matches) $('#chatIn').focus(); // 터치 기기에선 키보드가 갑자기 올라오지 않게
   },
   'name-invalid'() { nameBad = true; }, // 서버가 닉네임 규칙에 안 맞다고 거절 (곧 연결을 닫는다)
@@ -343,6 +368,15 @@ Object.assign(handlers, {
     renderUsers(); dmRefresh();
     if (at < 0) sys(m.user.name + ' 님이 들어왔어요.');
   },
+  'user-update'(m) { // 호스트가 바뀌었거나 대기열 추가 권한이 바뀌었다
+    const at = users.findIndex((x) => x.id === m.user.id);
+    if (at < 0) return;
+    users[at] = m.user;
+    if (m.user.id === me) { isHost = !!(m.user.host || m.user.admin); canQueue = !!m.user.canQueue; $('#banBox').hidden = !isHost; renderQueue(); }
+    renderUsers();
+  },
+  host(m) { sys(m.id === me ? '이제 내가 이 방의 호스트예요.' : m.name + ' 님이 호스트가 됐어요.'); },
+  'queue-denied'() { $('#qMsg').textContent = '대기열에 올리려면 호스트의 허락이 필요해요. 호스트에게 부탁해 보세요.'; },
   'user-away'(m) { const u = users.find((x) => x.id === m.id); if (u) { u.away = m.away; renderUsers(); } },
   'user-leave'(m) {
     const u = users.find((x) => x.id === m.id);
@@ -383,28 +417,36 @@ function renderUsers() {
   const ul = $('#users'); ul.replaceChildren();
   for (const u of users) {
     const li = el('li');
-    const canOpen = u.id !== me && u.uid !== meUid;          // 나를 뺀 모두에게 쪽지 메뉴
-    const canBan = isHost && !u.host;                         // 호스트만 강퇴·밴
+    const canOpen = u.id !== me;                              // 나를 뺀 모두에게 메뉴 (쪽지는 로그인한 사람끼리만)
+    const canBan = isHost && !u.host && !u.admin;             // 호스트(와 관리자)만 강퇴·밴. 호스트·관리자는 대상이 아님
     const row = el(canOpen ? 'button' : 'div', { className: 'urow' });
-    row.append(avEl(u), el('span', { className: 'nm', textContent: u.name + (u.id === me ? ' (나)' : '') }));
+    row.append(avEl(u), el('span', { className: 'nm' }, el('span', { textContent: u.name + (u.id === me ? ' (나)' : '') }), u.prev ? el('small', { className: 'prev', textContent: '이전: ' + u.prev }) : ''));
     if (u.away) { row.classList.add('away'); row.append(el('span', { className: 'tag soft', title: '연결이 끊겼어요. 돌아오면 그대로 이어져요', textContent: '자리 비움' })); }
     if (DEVICE_LABEL[u.device]) { const dv = el('span', { className: 'tag soft dev' }, icon(DEVICE_ICON[u.device]), DEVICE_LABEL[u.device]); row.append(dv); }
-    if (u.host) row.append(tag('호스트'));
+    if (u.host) row.append(tag('호스트')); else if (u.admin) row.append(tag('관리자')); else if (u.canQueue) row.append(tag('대기열 가능', true));
+    if (u.acct && !u.admin) row.append(tag('계정', true));
     if (u.id === sharerId) row.append(tag('공유 중', true));
     const vo = voiceList.find((x) => x.id === u.id);
     if (vo) { const vi = icon(vo.muted ? 'i-mic-off' : 'i-mic'); vi.setAttribute('class', 'i vi'); vi.setAttribute('role', 'img'); vi.setAttribute('aria-label', vo.muted ? '음성 참가 중, 마이크 꺼짐' : '음성 참가 중'); row.append(vi); }
     if (canOpen) {
       row.type = 'button'; row.dataset.uid = u.id;
       row.setAttribute('aria-expanded', openUser === u.id);
-      row.setAttribute('aria-label', `${u.name} ${canBan ? '쪽지·관리' : '쪽지'} 메뉴`);
+      row.setAttribute('aria-label', `${u.name}${u.host ? ', 호스트' : u.admin ? ', 관리자' : ''}${u.acct ? ', 계정' : ''}${u.away ? ', 자리 비움' : ''}${DEVICE_LABEL[u.device] ? ', ' + DEVICE_LABEL[u.device] : ''}${voiceList.some((x) => x.id === u.id) ? ', 음성 참가 중' : ''}, 메뉴`);
       const chev = icon('i-down'); chev.setAttribute('class', 'i chev');
       row.append(chev);
       row.onclick = () => { openUser = openUser === u.id ? null : u.id; renderUsers(); $(`[data-uid="${u.id}"]`)?.focus(); };
     }
     li.append(row);
     if (canOpen && openUser === u.id) {
-      const acts = el('div', { className: 'acts' }, el('button', { type: 'button', className: 'btn sm', textContent: '쪽지 보내기', onclick: () => openDm(u.uid, u) }));
+      const acts = el('div', { className: 'acts' });
+      if (meUid && u.uid && u.uid !== meUid) acts.append(el('button', { type: 'button', className: 'btn sm', textContent: '쪽지 보내기', onclick: () => openDm(u.uid, u) }));
+      else if (u.uid !== meUid || !u.uid) acts.append(el('small', { className: 'prev', textContent: !meUid ? '쪽지는 로그인하면 보낼 수 있어요.' : '게스트는 쪽지를 받을 수 없어요.' }));
       if (voiceList.some((x) => x.id === u.id)) acts.append(volumeControl(u));
+      if (isHost && !u.host && !u.admin) {
+        acts.append(
+          el('button', { type: 'button', className: 'btn sm', textContent: u.canQueue ? '대기열 추가 회수' : '대기열 추가 허용', onclick: () => send({ t: 'queue-grant', id: u.id, on: !u.canQueue }) }),
+          el('button', { type: 'button', className: 'btn sm', textContent: '호스트 넘기기', onclick: () => confirm(`${u.name} 님에게 호스트를 넘길까요?`) && send({ t: 'host-give', id: u.id }) }));
+      }
       if (canBan) acts.append(banBtn('강퇴', u, 'kick'), banBtn('사용자 밴', u, 'user'), banBtn('IP 밴', u, 'ip'));
       li.append(acts);
     }
@@ -423,7 +465,7 @@ function renderBans(bans = []) {
     const un = el('button', { type: 'button', className: 'btn sm', textContent: '해제' });
     un.setAttribute('aria-label', `${b.label} 차단 해제`);
     un.onclick = () => send({ t: 'unban', id: b.id });
-    ul.append(el('li', {}, el('span', { className: 'nm', textContent: b.label }), tag(b.type === 'ip' ? 'IP' : '사용자', true), un));
+    ul.append(el('li', {}, el('span', { className: 'nm', textContent: b.label }), tag(b.type === 'ip' ? 'IP' : b.type === 'acct' ? '계정' : '사용자', true), un));
   }
 }
 
@@ -440,7 +482,8 @@ function chatMsg(m) {
     ...(m.text ? [el('p', { textContent: m.text })] : []));
   if (m.media) bubble.append(mediaNode(m.media));
   bubble.style.setProperty('--c', u.color || 'var(--line)');
-  addLine(el('div', { className: 'm' + (m.id === me ? ' mine' : '') }, avEl(u), bubble));
+  const row = el('div', { className: 'm' + (m.id === me ? ' mine' : '') }, avEl(u), bubble);
+  row.dataset.sid = m.id; addLine(row);
   if (activeTab !== 'chat' && m.id !== me) setDot('chat', ++unread);
 }
 const sys = (t) => addLine(el('div', { className: 'sys', textContent: t }));
@@ -478,6 +521,6 @@ TABS.forEach((n, i) => {
 
 // 앱이 뜰 때 서버가 살아 있는지 확인: 꺼져 있으면(5xx, 연결 실패) 서비스 워커가 보여 준 앱 껍데기 위에 안내 페이지를 띄운다
 // 쪽지함에서 '방에 들어가기'로 새로 열린 화면이면 바로 입장한다 (모든 스크립트가 올라온 뒤에)
-addEventListener('load', () => { try { if (sessionStorage.getItem('autoJoin') && get('name')) { sessionStorage.removeItem('autoJoin'); $('#joinForm').requestSubmit(); } } catch {} });
+addEventListener('load', () => { try { if (sessionStorage.getItem('autoJoin') && (get('name') || loggedIn())) { sessionStorage.removeItem('autoJoin'); $('#joinForm').requestSubmit(); } } catch {} });
 fetch('/healthz', { cache: 'no-store' }).then((r) => { if (!r.ok) showServerDown(); }).catch(() => showServerDown());
 $('#nameIn').focus();
