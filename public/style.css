@@ -1,10 +1,10 @@
 /* ---------- 디자인 토큰 ---------- */
 :root{
-  --bg:#1b1530; --surface:#251d42; --surface-2:#30265a; --line:#463a74;
-  --text:#f4f0ff; --muted:#b5abd9; --accent:#ffb84d; --on-accent:#2a1b05;
-  --accent-text:#ffb84d; --danger:#ff8a98; --focus:#ffe0a3;
+  --bg:#1e1f22; --surface:#2b2d31; --surface-2:#383a40; --line:#41434a; /* 기본(기기 설정 따르기)은 플랫 다크 / 플랫 라이트 — themes.css 의 flat-dark·flat-light 와 같은 값 */
+  --text:#f2f3f5; --muted:#b5bac1; --accent:#4f5bd5; --on-accent:#ffffff;
+  --accent-text:#a8b1ff; --danger:#fa777c; --focus:#c9cdfb;
   --ok:#4ade80; --on-ok:#06220f; --info:#6ea8ff; --on-info:#061a3a; --on-danger:#2a0509;
-  --r-ctl:12px; --r-box:20px; --r-pill:999px;
+  --r-ctl:8px; --r-box:12px; --r-pill:999px;
   --ease:cubic-bezier(.2,.8,.2,1);
   --display:"Jua","IBM Plex Sans KR",system-ui,sans-serif;
   --body:"IBM Plex Sans KR","Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;
@@ -46,11 +46,37 @@ input::placeholder{color:var(--muted)}
 @keyframes pop{from{transform:scale(.88)}to{transform:scale(1)}}
 
 /* ---------- 입장 화면: 캐릭터 메이커 ---------- */
-.join{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:24px 16px}
+.join{min-height:100vh;min-height:100dvh;display:grid;place-items:center;padding:68px 16px 24px} /* 위쪽은 "테마·설정" 버튼 자리 */
 .maker{width:100%;max-width:880px;background:var(--surface);border:1.5px solid var(--line);border-radius:28px;padding:32px;display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:40px}
 .maker h1{font:400 40px/1.15 var(--display);margin:0 0 8px}
 .maker .lede{margin:0 0 24px;color:var(--muted)}
 .me{display:grid;gap:20px;align-content:start;justify-items:stretch}
+/* 입장 화면의 단계: auth(로그인·가입) → pick(쪽지/그룹방) → profile(프로필 설정) */
+.maker>.msg-err{grid-column:1/-1;margin:0;min-height:0}
+.maker>.msg-err:empty{display:none}
+.maker[data-step=auth],.maker[data-step=pick]{grid-template-columns:minmax(0,1fr);max-width:480px;gap:20px;text-align:center}
+.maker[data-step=auth] .me,.maker[data-step=auth] .make-wrap,.maker[data-step=pick] .me,.maker[data-step=pick] .make-wrap,.maker[data-step=profile] .gate{display:none}
+.maker[data-step=auth] #gatePick,.maker[data-step=pick] #gateAuth{display:none}
+.gate{display:grid;gap:20px;justify-items:stretch}
+.gate .lede{margin:0}
+.gate-btns{display:grid;gap:10px}
+.gate-note{margin:0;color:var(--muted);font-size:14px;line-height:1.5}
+.gate-note a{color:var(--accent-text)}
+.btn.link{background:none;border:0;min-height:44px;color:var(--muted);text-decoration:underline;font-size:14px}
+.btn.link:hover{color:var(--text)}
+.dests{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dest{min-height:132px;padding:16px 12px;display:grid;gap:6px;justify-items:center;align-content:center;text-align:center;background:var(--surface-2);border:1.5px solid var(--line);border-radius:var(--r-box);color:var(--text);font:inherit;cursor:pointer}
+.dest:hover{border-color:var(--accent-text)}
+.dest .i{width:30px;height:30px;color:var(--accent-text)}
+.dest b{font-size:22px;font-weight:700}
+.dest small{color:var(--muted);font-size:13px;line-height:1.4}
+.gate-row{display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+.me .back{justify-self:start}
+.me .back[hidden]{display:none}
+@media (max-width:480px){.dests{grid-template-columns:1fr}.dest{min-height:96px}}
+.dest[aria-busy] small{visibility:hidden;position:relative}
+.dest[aria-busy] small::after{content:'들어가는 중…';visibility:visible;position:absolute;left:0;right:0}
+.dest:disabled{opacity:.7;cursor:default}
 .me .av{margin:8px auto 8px}
 .actions{display:grid;gap:10px}
 .inbox-note{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
@@ -63,8 +89,6 @@ input::placeholder{color:var(--muted)}
 .make-wrap>summary{min-height:44px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-weight:600;cursor:pointer;margin-bottom:12px}
 .make-wrap>summary small{font-weight:400;color:var(--muted);font-size:13px}
 .prev{font-size:12px;color:var(--muted);font-weight:400}
-details.sub{border:1.5px solid var(--line);border-radius:var(--r-ctl);padding:0 12px 12px;display:grid;gap:10px;margin:8px 0}
-details.sub>summary{min-height:44px;display:flex;align-items:center;font-weight:600;cursor:pointer}
 .acctlist{list-style:none;margin:0;padding:0;display:grid;gap:8px}
 .acctlist li{display:grid;gap:8px;padding:10px 12px;border:1.5px solid var(--line);border-radius:var(--r-ctl)}
 .acctlist .nm{font-weight:600}
@@ -137,9 +161,11 @@ button.urow{cursor:pointer}
 button.urow:hover{background:var(--surface-2)}
 .urow .nm{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;font-weight:500}
 .urow .nm>*{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tag{font-size:12px;font-weight:600;color:var(--on-accent);background:var(--accent);border-radius:var(--r-pill);padding:1px 8px}
+.tag{flex:none;white-space:nowrap;font-size:12px;font-weight:600;line-height:1.4;color:var(--on-accent);background:var(--accent);border-radius:var(--r-pill);padding:1px 8px}
 .tag.soft{background:none;color:var(--accent-text);border:1.5px solid var(--accent-text)}
-.urow .chev{width:18px;height:18px;color:var(--muted);transition:transform .2s var(--ease)}
+.urow .tags{display:flex!important;flex-wrap:wrap;gap:4px;margin-top:3px;overflow:visible!important;white-space:normal!important}
+.urow>.av,.urow>.vi{flex:none}
+.urow .chev{flex:none;width:18px;height:18px;color:var(--muted);transition:transform .2s var(--ease)}
 .urow[aria-expanded=true] .chev{transform:rotate(180deg)}
 .acts{display:flex;gap:8px;padding:4px 8px 8px 56px;flex-wrap:wrap}
 .bans{margin:0 12px 12px;border:1.5px solid var(--line);border-radius:var(--r-ctl);padding:0 12px}
@@ -209,7 +235,7 @@ button.urow:hover{background:var(--surface-2)}
 }
 /* 폰: 헤더를 두 줄로 쌓는다. 윗줄은 로고와 설정, 아랫줄은 음성·마이크·화면 공유. PC와 같은 버튼, 같은 글자가 그대로 보인다 */
 @media (max-width:560px){
-  .top{display:grid;grid-template-columns:1fr auto;gap:8px}
+  .top{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
   .logo{grid-area:1/1}
   .top-util{grid-area:1/2}
   .top-media{grid-area:2/1/3/3;flex-wrap:wrap;gap:6px}
@@ -225,26 +251,13 @@ button.urow:hover{background:var(--surface-2)}
 .btn[aria-pressed=true]{border-color:var(--accent-text)}
 
 /* ---------- 설정 창 / 테마 선택 ---------- */
-.join-set{position:fixed;top:12px;right:12px;z-index:5}
+.join-set{position:absolute;top:12px;right:12px;z-index:5} /* 화면과 같이 스크롤돼서, 낮은 가로 화면에서 아래 내용을 가리지 않는다 */
 .dlg{--ring:var(--accent-text);width:min(600px,calc(100vw - 24px));max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px);padding:0;border:1.5px solid var(--line);border-radius:var(--r-box);background:var(--surface);color:var(--text)}
 .dlg::backdrop{background:rgba(0,0,0,.55)}
 .dlg-in{display:flex;flex-direction:column;max-height:calc(100vh - 24px);max-height:calc(100dvh - 24px)}
 .dlg-h{display:flex;align-items:center;justify-content:space-between;padding:12px 12px 12px 20px;border-bottom:1.5px solid var(--line);flex:none}
 .dlg-h h2{margin:0;font:400 22px/1.3 var(--display)}
 .dlg-b{overflow:auto;padding:4px 20px 24px;display:grid;gap:8px;overscroll-behavior:contain}
-.dlg-b h3{margin:16px 0 8px;font-size:15px;font-weight:600}
-.dlg-b h4{margin:12px 0 8px;font-size:14px;color:var(--muted);font-weight:500}
-.tgroup{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
-.tc{position:relative;display:grid;gap:8px;padding:10px;background:var(--bg);color:var(--text);border:2px solid var(--line);border-radius:var(--r-ctl);cursor:pointer}
-.tc input{position:absolute;opacity:0;inset:0;margin:0;cursor:pointer}
-.tc:has(input:checked){box-shadow:0 0 0 3px var(--ring)}
-.tc:has(input:focus-visible){outline:3px solid var(--ring);outline-offset:3px}
-.tc-p{display:grid;gap:4px;padding:8px;background:var(--surface);border-radius:8px}
-.tc-p i{display:block;height:8px;border-radius:4px;background:var(--muted)}
-.tc-p i:nth-child(2){background:var(--accent);width:60%}
-.tc-p i:nth-child(3){background:var(--surface-2);height:14px}
-.tc-n{font-size:14px;font-weight:500}
-.tc-d{font-size:12px;color:var(--muted)}
 
 /* 의미색 버튼: 시작·켜기 = 초록(음성)/파랑(공유), 끄기·나가기·중지 = 빨강. 색만으로 구분하지 않도록 아이콘·글자도 같이 바뀐다 */
 .btn.go,.btn.blue,.btn.stop{font-weight:600}
@@ -288,26 +301,75 @@ kbd{padding:1px 6px;border:1.5px solid var(--line);border-radius:6px;background:
 /* ---------- 화면 보호기 (패닉) ---------- */
 #saver{position:fixed;inset:0;z-index:1000;background:#000;cursor:none;touch-action:manipulation}
 /* 패닉 화면의 강의 */
-#lecture{position:fixed;inset:0;z-index:-1;opacity:0;pointer-events:none;background:#000}
-#lecture iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+/* 영상 칸: 아래 컨트롤 판(--lp) 위쪽만 쓴다. 영상은 칸 안에 통째로 들어가게(contain) 맞추고, "화면크기"(S1~S4)로 키울 수 있다(--z). 유튜브가 그리는 제목·추천·일시정지 표시는 영상이 움직이는 직후에 잠깐 나타나는데, 이건 자르는 것으로는 못 가리므로 아래 .lec-cover(검은 막)가 그동안 덮는다 */
+/* 노치·홈 바(안전 영역): --st/--sr/--sb/--sl 은 이 화면의 위/오른쪽/아래/왼쪽 여백이다. 90도 돌려 보일 때는 화면의 어느 쪽이 어디가 되는지 바뀐다 */
+#saver,#lecture{--st:env(safe-area-inset-top,0px);--sr:env(safe-area-inset-right,0px);--sb:env(safe-area-inset-bottom,0px);--sl:env(safe-area-inset-left,0px);--lp:calc(164px + var(--sb))}
+@media (max-width:759px),(max-height:500px){#saver,#lecture{--lp:calc(104px + var(--sb))}}
+#saver.rot,#lecture.rot{--st:env(safe-area-inset-right,0px);--sr:env(safe-area-inset-bottom,0px);--sb:env(safe-area-inset-left,0px);--sl:env(safe-area-inset-top,0px)}
+#lecture{position:fixed;inset:var(--st) var(--sr) var(--lp) var(--sl);z-index:-1;opacity:0;pointer-events:none;background:#0b0b0c;overflow:hidden;container-type:size;--z:1}
+#lecture iframe{position:absolute;left:50%;top:50%;border:0;pointer-events:none;--w:calc(min(100cqw,100cqh*16/9)*var(--z));width:var(--w);height:calc(var(--w)*9/16);transform:translate(-50%,-50%)}
 #lecture.on{z-index:999;opacity:1}
 #saver.lec{background:transparent}
 #saver.lec #saverCanvas,#saver.lec #saverClock{display:none}
-#saver:not(.lec) .lec-top,#saver:not(.lec) .lec-bar{display:none}
+#saver:not(.lec) .lec-bar,#saver:not(.lec) .lec-cover{display:none}
 .lec-shield{position:absolute;inset:0;touch-action:none;-webkit-user-select:none;user-select:none;outline:none}
-.lec-top{position:absolute;left:0;right:0;top:0;padding:14px 20px 28px;background:linear-gradient(rgba(0,0,0,.7),transparent);color:#f2f3f5;font:500 16px/1.3 var(--body);opacity:0;transition:opacity .25s;pointer-events:none}
-.lec-bar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:32px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(0,0,0,.78));color:#f2f3f5;opacity:0;transition:opacity .25s;pointer-events:none}
-#saver.ui{cursor:default}
-#saver.ui .lec-top,#saver.ui .lec-bar{opacity:1}
-#saver.ui .lec-bar{pointer-events:auto}
-.lec-bar button{flex:none;width:44px;height:44px;border:0;border-radius:50%;background:none;color:inherit;display:grid;place-items:center;cursor:pointer}
-.lec-bar button:hover{background:rgba(255,255,255,.16)}
-.lec-bar .i{width:22px;height:22px}
-.lec-bar input[type=range]{accent-color:#fff;height:44px;margin:0}
-#lecSeek{flex:1;min-width:0}
-#lecVol{flex:none;width:96px}
-#lecTime{flex:none;font-size:14px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.lec-hold{position:absolute;left:50%;bottom:96px;width:72px;height:72px;margin-left:-36px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(rgba(255,255,255,.8) calc(var(--p,0)*1%),rgba(255,255,255,.16) 0);opacity:0;transition:opacity .7s;pointer-events:none}
+.lec-cover{position:absolute;left:var(--sl);right:var(--sr);top:var(--st);bottom:var(--lp);display:grid;place-items:center;background:#0b0b0c;color:rgba(255,255,255,.5);opacity:0;pointer-events:none}
+.lec-cover.on{opacity:1}
+.lec-cover .i{width:64px;height:64px;fill:currentColor;stroke:none;grid-area:1/1}
+.lec-cover .spin{grid-area:1/1;width:44px;height:44px;border-radius:50%;border:4px solid rgba(255,255,255,.18);border-top-color:rgba(255,255,255,.7);animation:lecspin 1s linear infinite;display:none}
+.lec-cover.busy .i{display:none}
+.lec-cover.busy .spin{display:block}
+@keyframes lecspin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.lec-cover .spin{animation:none}}
+
+/* 강의 플레이어 컨트롤 판: 늘 보이는 어두운 판 (재생 위치 막대 → 재생·정지·이동 버튼 / 화면이동·구간반복·북마크·재생속도 / 볼륨·화면크기) */
+.lec-bar{position:absolute;left:0;right:0;bottom:0;height:var(--lp);display:flex;flex-direction:column;background:linear-gradient(#333337,#1c1c1f);border-top:1px solid #4a4a50;color:#e6e7ea;cursor:default;container-type:inline-size;font:13px/1.2 var(--body);padding:0 var(--sr) var(--sb) var(--sl);pointer-events:none}
+.lec-bar button,.lec-bar input,.lec-bar select{pointer-events:auto}
+.lec-row{flex:1;min-height:0;display:flex;align-items:center;gap:clamp(10px,2vw,32px);padding:0 clamp(10px,2vw,28px)}
+.lec-left{flex:none;display:flex;align-items:center;gap:clamp(8px,1.5vw,20px)}
+.lec-bar small{display:block;color:#9a9ba3;font-size:12px;margin-bottom:4px}
+.lec-time{flex:none;min-width:92px}
+.lec-time span{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:14px}
+.lec-main{flex:none;display:flex;gap:8px;align-items:center}
+.lec-bar button{flex:none;min-width:44px;height:44px;padding:0;border:1px solid #55555c;border-radius:50%;background:linear-gradient(#3d3d42,#232326);color:#e6e7ea;display:grid;place-items:center;cursor:pointer;font:inherit}
+.lec-bar button:hover{background:linear-gradient(#4a4a50,#2c2c30)}
+.lec-bar button:focus-visible,.lec-bar select:focus-visible,.lec-bar input:focus-visible{outline:2px solid #6aa7ff;outline-offset:2px}
+.lec-bar button.big{width:56px;height:56px;border-width:2px}
+.lec-bar .i{width:20px;height:20px;fill:currentColor;stroke:currentColor;stroke-width:1.6}
+#lecMute .i{fill:none}
+.lec-bar .big .i{width:26px;height:26px}
+.lec-bar input[type=range]{accent-color:#3d86e8;margin:0}
+#lecSeek{display:block;width:100%;height:24px;padding:0;background:#141416;border-bottom:1px solid #3a3a40}
+.lec-mid{flex:1;min-width:0;display:grid;gap:2px;align-content:center}
+.lec-line{display:flex;align-items:center;gap:10px;min-width:0}
+.lec-line>small{margin:0;flex:none;width:52px}
+.lec-step{display:flex;align-items:center;gap:6px;color:#c9cad1}
+.lec-bar select{width:auto;min-height:36px;padding:0 8px;border-radius:6px;border:1px solid #55555c;background:#232326;color:#e6e7ea;font:inherit}
+.lec-bar button.pill{height:36px;min-width:0;padding:0 12px;border-radius:6px;white-space:nowrap}
+.lec-bar button.pill[aria-pressed=true]{background:#2a5db0;border-color:#4a8bf0;color:#fff}
+.lec-marks{display:flex;gap:6px;min-height:0;flex-wrap:wrap}
+.lec-marks:empty{display:none}
+.lec-bar .lec-marks button{height:28px;min-width:44px;padding:0 8px;border-radius:5px;font-size:12px;font-variant-numeric:tabular-nums}
+#lecRates{display:flex;justify-content:space-between;flex:1;max-width:340px}
+#lecRates button{min-width:44px;width:auto;height:40px;border:0;border-radius:6px;background:none;font-size:12px;color:#aeb0b8;align-content:center;gap:4px}
+#lecRates button::before{content:'';display:block;width:8px;height:8px;border-radius:50%;background:#8a8b93;margin:0 auto}
+#lecRates button[aria-pressed=true]{color:#fff}
+#lecRates button[aria-pressed=true]::before{background:#4a97ff;box-shadow:0 0 0 3px rgba(74,151,255,.3)}
+#lecRate{display:none;width:auto;min-width:58px;border-radius:22px;font-size:13px;font-variant-numeric:tabular-nums;padding:0 12px}
+.lec-right{flex:none;display:grid;gap:2px;justify-items:end}
+.lec-vol{display:flex;align-items:center;gap:6px}
+.lec-vol input{width:clamp(70px,10vw,130px);height:40px}
+.lec-vol output{min-width:22px;text-align:right;font-variant-numeric:tabular-nums;color:#c9cad1}
+.lec-size{display:flex;align-items:center;gap:6px}
+.lec-size small{margin:0}
+#lecSizes{display:flex;gap:4px}
+#lecSizes button{min-width:40px;height:32px;padding:0 6px;border-radius:5px;font-size:12px}
+#lecSizes button[aria-pressed=true]{background:#2a5db0;border-color:#4a8bf0;color:#fff}
+@container (max-width:1040px){.lec-size{display:none}}
+@container (max-width:759px){.lec-mid,.lec-size{display:none}#lecRate{display:grid}.lec-right{margin-left:auto}}
+@media (max-width:759px),(max-height:500px){.lec-mid,.lec-size{display:none}#lecRate{display:grid}.lec-right{margin-left:auto}} /* 폰: 돌려서 보여 줄 때는 컨트롤 판 자체는 넓어도 높이가 낮으니 간단한 모양으로 */
+@container (max-width:560px){#lecVol,.lec-vol output{display:none}.lec-time{min-width:0}.lec-time small{display:none}}
+.lec-hold{position:absolute;left:50%;bottom:calc(var(--lp) + 24px);width:72px;height:72px;margin-left:-36px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(rgba(255,255,255,.8) calc(var(--p,0)*1%),rgba(255,255,255,.16) 0);opacity:0;transition:opacity .7s;pointer-events:none}
 .lec-hold::before{content:'';position:absolute;inset:6px;border-radius:50%;background:rgba(0,0,0,.6)}
 .lec-hold b{position:relative;font:500 26px/1 var(--body);color:#fff;font-variant-numeric:tabular-nums}
 .lec-hold.on{opacity:1}
@@ -321,9 +383,15 @@ kbd{padding:1px 6px;border:1.5px solid var(--line);border-radius:6px;background:
 .lec-btns button{min-height:44px;padding:0 18px;border-radius:10px;border:1.5px solid rgba(255,255,255,.3);background:none;color:#fff;font-weight:600;cursor:pointer}
 .lec-btns button[type=submit]{background:#fff;color:#111;border-color:#fff}
 #saver.asking{cursor:default}
-#saver.asking .lec-bar,#saver.asking .lec-hold{display:none}
+#saver.asking .lec-hold{display:none}
+#saver.asking .lec-bar{opacity:.5}
+#saver.asking .lec-bar *{pointer-events:none!important} /* 비밀번호를 묻는 동안에도 강의 화면과 컨트롤 판은 그대로 두고(뒤의 방이 비치지 않게), 컨트롤만 못 누르게 한다 */
 /* 방향 고정을 못 하는 기기(iPhone 등)에서 세로로 들고 있으면 화면을 90도 돌려 가로로 보여 준다 */
-#saver.rot,#lecture.rot{inset:auto;top:0;left:100%;width:100vh;height:100vw;transform-origin:0 0;transform:rotate(90deg)}
+#saver.rot,#lecture.rot{inset:auto;top:0;left:100%;width:100vh;width:100dvh;height:100vw;height:100dvw;transform-origin:0 0;transform:rotate(90deg)}
+#lecture.rot{top:var(--sl);left:calc(100% - var(--st));width:calc(100vh - var(--sl) - var(--sr));width:calc(100dvh - var(--sl) - var(--sr));height:calc(100vw - var(--st) - var(--lp));height:calc(100dvw - var(--st) - var(--lp))}
+/* 패닉이 켜져 있는 동안 뒤의 방·입장 화면은 아예 안 그린다 (비밀번호 입력 중 키보드로 화면이 밀려도, 아래 띠가 비어도 방이 비치지 않게) */
+html.saver-on{background:#000;overflow:hidden;overscroll-behavior:none}
+html.saver-on body>*:not(#saver):not(#lecture){visibility:hidden}
 #saver[hidden]{display:none}
 #saverCanvas{position:absolute;inset:0;width:100%;height:100%}
 #saverClock{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font:300 clamp(48px,12vw,140px)/1 var(--body);color:rgba(255,255,255,.22);font-variant-numeric:tabular-nums;letter-spacing:.02em;pointer-events:none}
@@ -336,7 +404,6 @@ kbd{padding:1px 6px;border:1.5px solid var(--line);border-radius:6px;background:
 dialog:not([open]){display:none} /* <dialog>를 모르는 브라우저는 내용을 페이지에 그대로 펼쳐 놓는다 */
 /* <dialog>를 모르는 브라우저용 대체: 화면 가운데에 직접 띄우고 뒤를 어둡게 */
 .dlg.fallback{position:fixed;inset:12px;margin:auto;height:fit-content;z-index:1000;box-shadow:0 0 0 100vmax rgba(0,0,0,.55)}
-.tc.sel{box-shadow:0 0 0 3px var(--ring)} /* :has()를 모르는 브라우저에서도 선택된 테마 표시 */
 @media (max-width:560px){ /* 폰: 작은 팝업 대신 화면을 꽉 채우는 시트. 맨 위 제목줄은 고정이고 안쪽만 스크롤 */
   .dlg,.dlg.fallback{inset:0;width:100%;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;border:0;border-radius:0}
   .dlg-in{height:100%;max-height:none}
@@ -383,11 +450,8 @@ input[type=range]{width:100%;min-height:44px;accent-color:var(--accent-text);cur
 .dm-only .side{width:100%;max-width:760px;margin:0 auto}
 @media (min-width:761px){.dm-only .side{border-right:1.5px solid var(--line)}}
 .guide{display:grid;gap:8px;margin-top:12px}
-.guide details{border:1.5px solid var(--line);border-radius:var(--r-ctl);background:var(--bg)}
-.guide summary{min-height:44px;display:flex;align-items:center;padding:0 14px;font-weight:600;cursor:pointer}
-.guide details[open]>summary{border-bottom:1.5px solid var(--line)}
-.guide ol,.guide ul{margin:0;padding:12px 14px 4px 34px;display:grid;gap:10px;line-height:1.55}
-.guide details>.note{margin:0;padding:8px 14px 14px}
+.guide ol,.guide ul{margin:0;padding:0 0 0 20px;display:grid;gap:10px;line-height:1.55}
+.guide details.sub>.note{margin:12px 0 0}
 .dm-top{padding:12px 12px 0;display:flex;gap:8px}
 #dmNew{margin-left:auto}
 .thr-who{flex:1}
@@ -440,7 +504,7 @@ input[type=search]{width:100%;min-height:48px;padding:0 14px;background:var(--bg
 }
 
 /* 새 버전 안내: 열어 둔 화면이 옛 버전일 때 */
-#upd{position:fixed;left:50%;top:calc(var(--top-h,12px) + 52px);transform:translateX(-50%);z-index:899;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 6px 6px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#upd{position:fixed;left:50%;top:calc(var(--top-h,12px) + 8px);transform:translateX(-50%);z-index:899;display:flex;align-items:center;gap:10px;max-width:calc(100% - 24px);padding:6px 6px 6px 16px;border-radius:var(--r-pill);background:var(--surface-2);color:var(--text);border:1.5px solid var(--accent-text);font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.35)}
 #upd .btn{min-height:44px;flex:none}
 
 /* 연결이 끊겨 자리를 비운 사람 (폰 화면이 꺼진 경우 등) */
@@ -456,3 +520,187 @@ input[type=search]{width:100%;min-height:48px;padding:0 14px;background:var(--bg
 
 /* 헤더의 "소리 끄기" 글자 버튼: 폰에서도 한 줄로 */
 #soundBtn { white-space: nowrap; padding: 0 12px; gap: 6px; }
+@media (max-width:420px){#soundBtn{padding:0 10px;min-width:44px}#soundBtn .lbl{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}} /* 좁은 폰: 글자는 접근성용으로만 남기고 아이콘만 보인다 (로고를 가리지 않게). 꺼지면 아이콘이 바뀌고 빨강 */
+
+/* ================= 설정 창: 왼쪽 분류 + 오른쪽 내용 (폰은 목록 → 내용) ================= */
+#settings{width:min(860px,calc(100vw - 24px))}
+#settings .dlg-in{height:min(640px,calc(100vh - 24px));height:min(640px,calc(100dvh - 24px))}
+#setBack{display:none}
+.set-wrap{flex:1;min-height:0;display:grid;grid-template-columns:210px minmax(0,1fr)}
+.set-nav{display:flex;flex-direction:column;gap:2px;padding:12px 10px;border-right:1.5px solid var(--line);overflow:auto;background:var(--bg)}
+.set-tab{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border:0;border-radius:var(--r-ctl);background:none;color:var(--muted);font:inherit;font-weight:500;text-align:left;cursor:pointer}
+.set-tab>span:first-child{flex:1}
+.set-tab:hover{background:var(--surface-2);color:var(--text)}
+.set-tab[aria-current=page]{background:var(--surface-2);color:var(--text)}
+.set-tab:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.set-tab .set-sum,.set-tab .i{display:none}
+.set-tab .i{width:18px;height:18px;transform:rotate(180deg);color:var(--muted)}
+.set-pane{display:block;overflow:auto;padding:4px 28px 32px;overscroll-behavior:contain}
+.set-page:not(.on){display:none}
+.set-page>h3{margin:16px 0 4px;font:600 20px/1.3 var(--body)}
+.gt{margin:24px 0 8px;font-size:13px;font-weight:600;color:var(--muted)}
+.gt small{margin-left:6px;font-weight:400}
+.sgroup{background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-box);padding:0 16px}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:56px;padding:10px 0}
+.sgroup>*+*{border-top:1px solid var(--line)}
+.srow .st{display:grid;gap:2px;min-width:0}
+.srow .st b{font-weight:500}
+.srow .st small{color:var(--muted);font-size:13px;line-height:1.4}
+label.srow{cursor:pointer}
+.srow select{width:auto;min-width:170px;max-width:55%;min-height:44px}
+.srow.stack{display:block}
+.srow.rng{display:grid;grid-template-columns:minmax(0,1fr) auto 190px;align-items:center;column-gap:14px}
+.srow.rng output{font-variant-numeric:tabular-nums;color:var(--muted);min-width:3.5ch;text-align:right}
+.srow.rng input{width:100%;margin:0}
+.note.pad{margin:0;padding:12px 0}
+.swt{appearance:none;-webkit-appearance:none;flex:none;width:46px;height:28px;margin:0;border-radius:14px;background:var(--surface-2);border:1.5px solid var(--line);position:relative;cursor:pointer;transition:background .15s,border-color .15s}
+.swt::after{content:'';position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.swt:checked{background:var(--accent);border-color:var(--accent)}
+.swt:checked::after{transform:translateX(18px);background:var(--on-accent)}
+.swt:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.swt:disabled{opacity:.5;cursor:default}
+details.danger-zone{border-color:var(--danger)}
+details.danger-zone>summary{color:var(--danger)}
+details.danger-zone .srow{padding:0}
+/* 테마: 작은 동그라미 견본 (왼쪽 위 = 배경, 오른쪽 아래 = 강조색). 이름은 아래 한 줄과 툴팁·스크린리더로 */
+#themeGrid{display:grid;gap:10px}
+.tgl{margin:6px 0 0;font-size:13px;font-weight:500;color:var(--muted)}
+.tgroup{display:flex;flex-wrap:wrap;gap:10px}
+.tc{position:relative;display:block;width:44px;height:44px;border-radius:50%;border:2px solid var(--line);background:linear-gradient(135deg,var(--bg) 0 50%,var(--accent) 50% 100%);color:var(--text);cursor:pointer}
+.tc input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}
+.tc-n{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tc:hover{border-color:var(--muted)}
+.tc:has(input:focus-visible){outline:3px solid var(--ring);outline-offset:3px}
+.tc.sel{border-color:var(--ring);box-shadow:0 0 0 3px var(--ring)}
+.tc.sel::after{content:'✓';position:absolute;right:-6px;bottom:-6px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--text);color:var(--bg);font-size:12px;font-weight:700;line-height:1}
+.tc.auto{width:auto;height:44px;padding:0 16px 0 40px;border-radius:22px;background:var(--bg);display:flex;align-items:center}
+.tc.auto::before{content:'';position:absolute;left:10px;top:50%;width:22px;height:22px;margin-top:-11px;border-radius:50%;background:linear-gradient(90deg,#1e1f22 50%,#f2f3f5 50%);border:1.5px solid var(--muted)}
+.tc.auto .tc-n{position:static;width:auto;height:auto;clip:auto;overflow:visible;font-size:14px;font-weight:500}
+.theme-cap{margin:2px 0 0;font-size:13px;color:var(--muted)}
+@media (max-width:700px){
+  #settings,#settings.fallback{inset:0;width:100%;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;border:0;border-radius:0}
+  #settings .dlg-in{height:100%;max-height:none}
+  .set-wrap{display:flex;flex-direction:column}
+  #settings[data-view=list] .set-pane,#settings[data-view=page] .set-nav{display:none}
+  #settings[data-view=page] #setBack{display:inline-flex}
+  .dlg-h{gap:4px}
+  .dlg-h h2{flex:1}
+  .set-nav{flex:1;border-right:0;padding:12px 16px calc(24px + env(safe-area-inset-bottom));background:var(--surface);gap:8px}
+  .set-tab{min-height:56px;padding:0 16px;color:var(--text);background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-box)}
+  .set-tab .set-sum{display:block;flex:none;max-width:45%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:13px;font-weight:400;color:var(--muted)}
+  .set-tab .i{display:block}
+  .set-pane{padding:4px 16px calc(32px + env(safe-area-inset-bottom))}
+  .set-page>h3{display:none}
+  .srow.rng{grid-template-columns:minmax(0,1fr) auto}
+  .srow.rng input{grid-column:1/-1;margin-bottom:6px}
+  .srow select{min-width:140px}
+}
+
+/* 쪽지 암호화 확인 */
+.btn.enc{flex:none;gap:6px;color:var(--accent-text);border-color:var(--accent-text)}
+.btn.enc.ok{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.enc:disabled{opacity:.6;cursor:default}
+.note.blk.warn{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface-2);color:var(--text);border-left:4px solid var(--danger)}
+.note.blk.warn[hidden]{display:none}
+.note.blk.warn .btn{flex:none}
+.enc-dlg{width:min(520px,calc(100vw - 24px))}
+.enc-b{padding-bottom:24px}
+.enc-lead{margin:12px 0 0;font-weight:500;line-height:1.5}
+.safe-num{display:grid;grid-template-columns:repeat(3,auto);justify-content:center;gap:6px 18px;padding:16px;margin:8px 0 12px;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-box);font:600 24px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.enc-cmp{display:grid;gap:12px}
+.enc-cmp small{display:block;color:var(--muted);font-size:13px;margin-bottom:4px}
+.enc-cmp code{display:block;max-height:7em;overflow:hidden;word-break:break-all;font:12px/1.5 ui-monospace,Consolas,monospace;padding:10px;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-ctl);color:var(--muted)}
+.enc-cmp p{margin:0;padding:10px;background:var(--bg);border:1.5px solid var(--line);border-radius:var(--r-ctl);white-space:pre-wrap;word-break:break-word}
+@media (max-width:420px){.safe-num{grid-template-columns:repeat(2,auto);font-size:22px}}
+
+/* 처음 쓰는 사람을 위한 안내 (카드 + 하이라이트) */
+#tour{position:fixed;inset:0;z-index:900}
+.tour-dim{position:fixed;inset:0;background:rgba(0,0,0,.62)}
+.tour-spot{position:fixed;border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.62),0 0 0 3px var(--accent-text);pointer-events:none;transition:left .25s var(--ease),top .25s var(--ease),width .25s var(--ease),height .25s var(--ease)}
+.tour-card{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(340px,calc(100vw - 24px));padding:18px;background:var(--surface);color:var(--text);border:1.5px solid var(--line);border-radius:var(--r-box);box-shadow:0 12px 40px rgba(0,0,0,.45)}
+#tour:not(.plain) .tour-card{transform:none}
+.tour-card small{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}
+.tour-card h2{margin:0 0 8px;font:600 19px/1.35 var(--body)}
+.tour-card p{margin:0 0 16px;line-height:1.55;color:var(--muted)}
+.tour-btns{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.tour-btns .link{margin-right:auto}
+@media (prefers-reduced-motion:reduce){.tour-spot{transition:none}}
+.tour-spot[hidden],.tour-dim[hidden]{display:none}
+
+/* ================= 설정 창 간격 정리: 한 가지 리듬 ================= */
+/* 한 페이지 안의 덩어리(제목·소제목·설명·묶음·접는 칸) 사이는 모두 12px. 소제목은 위쪽에 12px 더 띄우고 아래쪽은 4px 줄여서, 바로 아래 내용과 한 덩어리로 보이게 한다 */
+.set-page,.setbox{display:grid;gap:12px;align-content:start;min-width:0}
+.set-page>h3{margin:12px 0 0}
+.set-page .gt{margin:12px 0 -4px}
+.set-page>.gt:first-of-type,.set-page>h3+.gt{margin-top:0}
+.set-page .note{margin:0;line-height:1.5}
+.set-page .sgroup{margin:0}
+.set-page #themeGrid{margin:0}
+.set-page .acctlist{margin:0}
+.set-page .setbox[hidden],.set-page .set-sub[hidden]{display:none}
+/* 접는 칸: 묶음(.sgroup)과 같은 카드 모양. 제목 줄은 56px 안에서 위아래 가운데, 펼치면 안쪽 내용 사이도 12px */
+details.sub{display:block;margin:0;padding:0 16px;border:1.5px solid var(--line);border-radius:var(--r-box);background:var(--bg)}
+details.sub>summary{display:flex;align-items:center;gap:12px;min-height:56px;font-weight:500;cursor:pointer;list-style:none;border-radius:var(--r-box)}
+details.sub>summary::-webkit-details-marker{display:none}
+details.sub>summary::after{content:'';flex:none;width:8px;height:8px;margin:-4px 4px 0 auto;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);transition:transform .15s}
+details.sub[open]>summary::after{margin-top:4px;transform:rotate(-135deg)}
+details.sub>summary:focus-visible{outline:2px solid var(--focus);outline-offset:-3px}
+details.sub[open]{padding-bottom:16px}
+.set-page details.sub>*:not(summary){margin:12px 0 0}
+.set-page details.sub>.sgroup,.set-page details.sub>.srow{margin-top:12px}
+details.danger-zone{border-color:var(--danger)}
+details.danger-zone>summary{color:var(--danger)}
+details.danger-zone .srow{padding:0;min-height:48px}
+/* 계정 목록(관리자): 이름 줄은 이름·꼬리표를 같은 높이로 가운데 맞춘다 */
+.acctlist li{gap:10px;padding:12px 14px;border-radius:var(--r-box)}
+.acctlist li>div:first-child{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;min-height:28px}
+.acctlist .nm{display:inline-flex;align-items:center;font-weight:600;line-height:1.4}
+.acctlist li .tag{display:inline-flex;align-items:center}
+@media (prefers-reduced-motion:reduce){details.sub>summary::after{transition:none}}
+.set-page .note:empty,.set-page .setbox:empty{display:none} /* 아직 글이 없는 안내(상태 메시지 칸)는 간격도 차지하지 않게 */
+.acctlist .btns:empty{display:none} /* 관리자 줄처럼 누를 버튼이 없으면 빈 칸을 남기지 않는다 */
+@media (max-width:700px){
+  .set-pane{padding-top:16px} /* 폰은 페이지 제목(h3)이 헤더로 올라가 있어서 내용이 헤더에 붙지 않게 */
+  .dlg-h #setBack{margin-right:8px}
+}
+.set-page>h3{margin:12px 0 4px}
+.set-page .guide{margin:0;gap:12px}
+.srow>.btn,.srow>select,.srow>.swt{flex:none;white-space:nowrap} /* 설명이 길어도 버튼 글자가 두 줄로 꺾이지 않게 (줄어드는 건 설명 쪽) */
+.set-page,.setbox{grid-template-columns:minmax(0,1fr)} /* 안쪽에 넓은 것이 있어도 페이지 칸이 옆으로 늘어나지 않게 (작은 폰에서 6px 넘치던 문제) */
+
+#upd .btn.link{min-height:44px;color:inherit;opacity:.85} /* 새 버전 띠의 "나중에" */
+
+/* 쪽지 알림 권한 안내 */
+#notifAsk{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:850;width:min(420px,calc(100vw - 24px));padding:18px;background:var(--surface);color:var(--text);border:1.5px solid var(--line);border-radius:var(--r-box);box-shadow:0 12px 40px rgba(0,0,0,.45)}
+#notifAsk[hidden]{display:none}
+#notifAsk h2{margin:0 0 8px;font:600 18px/1.35 var(--body)}
+#notifAsk p{margin:0 0 12px;line-height:1.55;color:var(--muted)}
+#notifAsk .note:empty{display:none}
+.na-btns{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.na-btns .link{margin-right:auto}
+
+/* 나만의 테마·배경 이미지·미리보기 */
+input.clr{flex:none;width:64px;height:44px;padding:2px;background:var(--bg);border:1.5px solid var(--line);border-radius:8px;cursor:pointer}
+.srow-btns{display:flex;gap:8px;flex:none}
+.srow-btns .btn{white-space:nowrap}
+.srow.bgopt[hidden]{display:none}
+.tc.pill.custom::before{background:conic-gradient(#ff6b6b,#ffd93d,#6bcb77,#4d96ff,#c77dff,#ff6b6b);border:0}
+.look-prev{padding:12px 0!important;gap:10px!important;background:none}
+.look-prev .m .bubble{flex:1}
+/* 배경 이미지: 맨 뒤에 사진, 그 위에 테마 배경색을 어둡게 덮고, 앞쪽 패널은 불투명도를 낮춰 사진이 비치게 한다 */
+html.has-bg{background:var(--bg)}
+html.has-bg::before{content:'';position:fixed;inset:-24px;z-index:-2;background:var(--bg-img,none) center/cover no-repeat;filter:blur(var(--bg-blur,0px))}
+html.has-bg::after{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;background:color-mix(in srgb,var(--bg) var(--bg-dim,55%),transparent)}
+html.has-bg body{background:transparent}
+@supports (background:color-mix(in srgb,red 50%,blue)){
+  html.has-bg .top,html.has-bg .side,html.has-bg .maker,html.has-bg .dest,html.has-bg .stage .empty{background:color-mix(in srgb,var(--surface) var(--bg-surf,85%),transparent)}
+  html.has-bg .top,html.has-bg .side,html.has-bg .maker{-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+}
+
+/* 터치 화면(특히 패드)에서 패닉 화면 컨트롤을 40px 이상으로 */
+.lec-bar button.pill{height:40px}
+.lec-bar select{min-height:40px}
+#lecSizes button{min-width:44px;height:40px}
+
+/* 휴대폰 가로: 새 버전 띠가 오른쪽 패널의 탭을 가리지 않게 영상 쪽에 띄운다 (원래 #upd 규칙보다 뒤에 와야 한다) */
+@media (max-width:960px) and (orientation:landscape){#upd{left:calc((100% - var(--side-w,320px)) / 2);max-width:calc(100% - var(--side-w,320px) - 24px)}}

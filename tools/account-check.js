@@ -56,7 +56,7 @@ const UA = {
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!SHOTS) return; const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
-      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}/?step=profile` }); await wait(1200);
       return p;
     }
     const noOverflow = `document.documentElement.scrollWidth <= innerWidth`;
@@ -108,7 +108,7 @@ const UA = {
     check(await H.js("![...document.querySelectorAll('.acts .btn')].some((b) => b.textContent === '쪽지 보내기') && [...document.querySelectorAll('.acts small')].some((s) => s.textContent.includes('로그인하면'))"), '게스트에게는 "쪽지 보내기" 대신 로그인하면 보낼 수 있다는 안내가 보임');
 
     console.log('닉네임 바꾸기 (설정 → 계정)');
-    await G.tap('#settingsBtn'); await wait(400);
+    await G.tap('#settingsBtn'); await G.js("setPage('acct')"); await wait(400);
     check(await G.js("!document.querySelector('#acctIn').hidden && document.querySelector('#acctInfo').textContent.includes('화면가입자')"), '설정에 계정 정보가 보임');
     await G.type('#renIn', '화면새이름'); await G.tap('#renGo'); await wait(900);
     check(await G.js("document.querySelector('#renMsg').textContent.includes('화면새이름') && get('acctName') === '화면새이름'"), '닉네임이 바뀌고 안내가 뜸');
@@ -131,7 +131,7 @@ const UA = {
     const AD = await page(1280, 860, false); await AD.js(loginJs(await adminLogin(PORT))); await AD.tap('#enter'); await wait(1800);
     check(await AD.js("joined && isAdmin && !isHost === false && !users.find((u) => u.id === me).host"), '관리자로 입장함 (호스트는 아님)');
     await AD.js("window.confirm = () => true");
-    await AD.tap('#settingsBtn'); await wait(400);
+    await AD.tap('#settingsBtn'); await AD.js("setPage('acct')"); await wait(400);
     check(await AD.until("!document.querySelector('#adminSec').hidden && document.querySelectorAll('#acctList li').length >= 3"), '관리자의 설정 창에는 계정 목록(관리자와 가입한 사람들)이 보임');
     check(await AD.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리자')).querySelectorAll('button').length === 0"), '관리자 계정에는 초기화·밴·삭제 버튼이 없음');
     await AD.js("[...document.querySelectorAll('#acctList li')].find((l) => l.textContent.includes('관리대상계정')).querySelector('button').click()"); await wait(900);
@@ -139,7 +139,7 @@ const UA = {
     await AD.js("document.querySelector('#adminSec').scrollIntoView()"); await AD.shot('6-admin-list-desktop');
 
     console.log('로그아웃과 다시 로그인');
-    await G.tap('#settingsBtn'); await G.tap('#logoutBtn');
+    await G.tap('#settingsBtn'); await G.js("setPage('acct')"); await G.tap('#logoutBtn');
     check(await G.until("document.readyState === 'complete' && !loggedIn()", 10000), '로그아웃하면 화면이 새로 열리고 로그인 상태가 풀림');
     await wait(1500);
     check(await G.js("!loggedIn() && !document.querySelector('#nameIn').readOnly && !document.querySelector('#join').hidden"), '입장 화면이 게스트 상태로 돌아감');
@@ -151,8 +151,8 @@ const UA = {
     check(await G.js("loggedIn() && get('acctName') === '화면새이름' && document.querySelector('#nameIn').value === '화면새이름'"), '맞는 비밀번호로 다시 로그인됨 (바꾼 닉네임으로)');
 
     console.log('계정 삭제');
-    await G.tap('#joinSettings'); await wait(300);
-    await G.js("[...document.querySelectorAll('details.sub > summary')].find((s) => s.textContent.includes('계정 삭제')).click(); window.confirm = () => true"); await wait(200);
+    await G.tap('#joinSettings'); await G.js("setPage('acct')"); await wait(300);
+    await G.js("document.querySelector('.danger-zone > summary').click(); [...document.querySelectorAll('details.sub > summary')].find((s) => s.textContent.includes('계정 삭제')).click(); window.confirm = () => true"); await wait(200);
     await G.type('#delPw', 'screen-pass-12'); await G.tap('#delGo');
     check(await G.until("document.readyState === 'complete' && !loggedIn()", 10000), '계정을 삭제하면 로그인이 풀리고 화면이 새로 열림');
     await wait(1200);

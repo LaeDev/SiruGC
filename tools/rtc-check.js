@@ -42,7 +42,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
         setInterval(() => { g.fillStyle = 'hsl(' + (n++ * 7 % 360) + ' 70% 50%)'; g.fillRect(0, 0, 640, 360); g.fillStyle = '#fff'; g.font = '48px sans-serif'; g.fillText('SHARE ' + n, 40, 200); }, 50);
         return c.captureStream(20); };` });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(`(() => { const n = document.querySelector('#nameIn'); n.value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`);
       await wait(1000);
       return { js, call };

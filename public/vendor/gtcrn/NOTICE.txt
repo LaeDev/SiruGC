@@ -1,0 +1,7 @@
+AI 잡음 억제에 쓰는 제3자 구성요소 (모두 이 기기 안에서만 실행되며, 마이크 소리는 어디로도 보내지 않습니다)
+
+- GTCRN (신경망 음성 잡음 제거 모델) — MIT License, Copyright (c) 2024 Rong Xiaobin — https://github.com/Xiaobin-Rong/gtcrn
+- gtcrn-wasm / @sapphi-red/web-noise-suppressor 0.4.1 (모델을 WebAssembly·AudioWorklet 으로 묶은 것) — MIT License, Copyright (c) 2022 green (sapphi-red)
+- pffft (workletProcessor.js 맨 위의 고지 참고) — BSD 계열 라이선스
+
+workletProcessor.js 와 gtcrn.wasm 은 위 패키지(npm: @sapphi-red/web-noise-suppressor)의 dist 파일을 수정 없이 복사한 것입니다.

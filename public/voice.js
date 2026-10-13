@@ -11,10 +11,9 @@ let actx = null, mg = null; // mg: 내 마이크 처리 그래프
 const levels = new Map(); // id → { an, buf, src }  (누가 말하는지 표시용)
 const dropLevel = (id) => { try { levels.get(id)?.src.disconnect(); } catch {} levels.delete(id); };
 
-const VOICE_FILTERS = { off: '원래 목소리', high: '높은 목소리', low: '낮은 목소리', robot: '로봇', radio: '라디오', cave: '동굴' };
-let voicePrefs = { filter: 'off', mic: 100, ns: true, ec: true, agc: true, monitor: false };
+let voicePrefs = { mic: 100, ns: true, nsAmt: 100, dr: 0, ec: true, agc: true, monitor: false };
 try { Object.assign(voicePrefs, JSON.parse(get('voicePrefs') || '{}')); } catch {}
-if (!VOICE_FILTERS[voicePrefs.filter]) voicePrefs.filter = 'off';
+delete voicePrefs.filter; // (옛 버전의 목소리 필터 설정은 버린다)
 let voiceVol = {}; // 사람별 목소리 크기 (공개 번호 uid → 0~2). 브라우저에 저장해서 다음에도 유지
 try { voiceVol = JSON.parse(get('voiceVol') || '{}'); } catch {}
 const saveVoicePrefs = () => set('voicePrefs', JSON.stringify(voicePrefs));
@@ -22,7 +21,7 @@ const saveVoicePrefs = () => set('voicePrefs', JSON.stringify(voicePrefs));
 const inVoice = () => !!mic;
 const audioCtx = () => {
   if (!actx) {
-    actx = new AC();
+    try { actx = new AC({ sampleRate: 48000 }); } catch { actx = new AC(); } // 기기가 44.1k·96k 라도 48kHz 로 맞춘다 (AI 잡음 억제가 48kHz 용이고, 음성 통화도 48kHz 가 기본)
     actx.onstatechange = () => { applyAllVoiceVolumes(); if (actx.state !== 'running') actx.resume?.().catch(() => {}); };
   }
   if (actx.state !== 'running') actx.resume?.().catch(() => {});
@@ -33,55 +32,55 @@ for (const ev of ['pointerdown', 'keydown', 'touchend', 'visibilitychange']) add
 setInterval(() => { if (actx && inVoice() && actx.state !== 'running') actx.resume().catch(() => {}); }, 2000);
 addEventListener('pointerdown', () => actx?.state === 'suspended' && actx.resume?.(), { passive: true }); // 브라우저가 멈춰 둔 오디오를 첫 터치에 깨운다
 
-/* ---------- 목소리 필터 ---------- */
-// 높낮이 바꾸기: 소리를 지연선에 통과시키며 지연 시간을 톱니파로 흔든다(도플러 효과). 두 개를 반 주기씩 어긋나게 번갈아 섞어서 끊김을 가린다.
-// ratio > 1 이면 높아지고 < 1 이면 낮아진다. 지연이 줄어드는 속도가 (ratio-1)이다.
-function makePitchShifter(ctx, ratio) {
-  const P = 0.1, slope = Math.abs(ratio - 1), range = slope * P, base = 0.02, up = ratio > 1;
-  const len = Math.round(P * ctx.sampleRate);
-  const saw = ctx.createBuffer(1, len, ctx.sampleRate), win = ctx.createBuffer(1, len, ctx.sampleRate);
-  const s = saw.getChannelData(0), w = win.getChannelData(0);
-  for (let i = 0; i < len; i++) { const ph = i / len; s[i] = up ? 1 - ph : ph; w[i] = Math.sin(Math.PI * ph) ** 2; }
-  const input = ctx.createGain(), output = ctx.createGain(), nodes = [input, output], sources = [];
-  const t0 = ctx.currentTime + 0.05;
-  for (const offset of [0, P / 2]) {
-    const delay = ctx.createDelay(1); delay.delayTime.value = base;
-    const depth = ctx.createGain(); depth.gain.value = range;
-    const weight = ctx.createGain(); weight.gain.value = 0;
-    const mod = ctx.createBufferSource(), fade = ctx.createBufferSource();
-    mod.buffer = saw; fade.buffer = win; mod.loop = fade.loop = true;
-    mod.connect(depth).connect(delay.delayTime); fade.connect(weight.gain);
-    input.connect(delay); delay.connect(weight).connect(output);
-    mod.start(t0 + offset); fade.start(t0 + offset);
-    sources.push(mod, fade); nodes.push(delay, depth, weight);
-  }
-  return { input, output, stop() { sources.forEach((x) => { try { x.stop(); } catch {} }); nodes.forEach((n) => { try { n.disconnect(); } catch {} }); } };
+/* ---------- AI 잡음 억제 (GTCRN 신경망, 이 기기 안에서만 실행) ----------
+   브라우저 기본 잡음 억제는 키보드·선풍기·주변 말소리를 잘 못 지운다. 그래서 작은 신경망(GTCRN, MIT)을 AudioWorklet 으로 돌려서 목소리만 남긴다.
+   "강도"는 처리한 소리와 원래 소리를 섞는 비율이다. 못 불러오면(구형 브라우저, 샘플레이트 불일치) 브라우저 기본 잡음 억제로 대신한다. 출처: public/vendor/gtcrn/NOTICE.txt */
+let nsState = 'idle', nsWasm = null, nsCtx = null; // idle | ready | fail
+const NS_NODE = '@sapphi-red/web-noise-suppressor/gtcrn', NS_LATENCY = 768 / 48000; // 48kHz에서 한 번에 768샘플씩 처리하므로 원래 소리도 그만큼 늦춰 섞는다
+let nsLoading = null; // 불러오는 중이면 같은 약속을 돌려준다 (미리 불러오기와 음성 참가가 겹쳐도 한 번만)
+const nsLoad = () => (nsLoading ||= nsLoadOnce().finally(() => { nsLoading = null; }));
+async function nsLoadOnce() {
+  if (nsState === 'fail') return false;
+  try {
+    const ctx = audioCtx();
+    if (nsState === 'ready' && nsCtx === ctx) return true;
+    if (!ctx.audioWorklet || (ctx.sampleRate !== 48000 && ctx.sampleRate !== 16000)) throw new Error('이 브라우저는 AI 잡음 억제를 쓸 수 없어요 (' + ctx.sampleRate + 'Hz)');
+    if (!nsWasm) { const r = await fetch('/vendor/gtcrn/gtcrn.wasm?v=' + BUILD); if (!r.ok) throw new Error('모델 파일을 못 받았어요'); nsWasm = await r.arrayBuffer(); }
+    if (nsCtx !== ctx) { await ctx.audioWorklet.addModule('/vendor/gtcrn/workletProcessor.js?v=' + BUILD); nsCtx = ctx; }
+    nsState = 'ready'; return true;
+  } catch (e) { console.warn('AI 잡음 억제를 못 켜서 브라우저 기본 잡음 억제를 써요:', e.message); nsState = 'fail'; return false; }
 }
-// 목소리를 바꾸는 효과 하나를 만든다 (입력 노드 → 출력 노드). 효과가 없으면 null.
-function makeFilter(ctx, kind) {
-  const input = ctx.createGain(), output = ctx.createGain(), nodes = [input, output], extra = [];
-  const done = () => ({ input, output, stop() { extra.forEach((o) => { try { o.stop(); } catch {} }); nodes.forEach((n) => { try { n.disconnect(); } catch {} }); } });
-  const node = (n) => (nodes.push(n), n);
-  if (kind === 'high' || kind === 'low') { const p = makePitchShifter(ctx, kind === 'high' ? 1.35 : 0.75); input.connect(p.input); p.output.connect(output); return { input, output, stop() { p.stop(); [input, output].forEach((n) => { try { n.disconnect(); } catch {} }); } }; }
-  if (kind === 'robot') { // 링 변조: 목소리에 70Hz 사인파를 곱하면 금속성 소리가 난다. 원음을 조금 섞어 알아듣기 쉽게
-    const ring = node(ctx.createGain()), dry = node(ctx.createGain()), osc = ctx.createOscillator();
-    ring.gain.value = 0; dry.gain.value = 0.3; osc.frequency.value = 70; osc.connect(ring.gain); osc.start(); extra.push(osc);
-    input.connect(ring).connect(output); input.connect(dry).connect(output); return done();
-  }
-  if (kind === 'radio') { // 좁은 대역 + 살짝 찌그러뜨리기: 무전기/라디오 느낌
-    const hp = node(ctx.createBiquadFilter()), lp = node(ctx.createBiquadFilter()), sh = node(ctx.createWaveShaper());
-    hp.type = 'highpass'; hp.frequency.value = 600; lp.type = 'lowpass'; lp.frequency.value = 3200;
-    const curve = new Float32Array(257); for (let i = 0; i < 257; i++) { const x = (i / 128) - 1; curve[i] = Math.tanh(x * 3) / Math.tanh(3); }
-    sh.curve = curve; input.connect(hp).connect(lp).connect(sh).connect(output); return done();
-  }
-  if (kind === 'cave') { // 되울리는 소리: 지연 + 되먹임 + 어두운 음색
-    const dry = node(ctx.createGain()), delay = node(ctx.createDelay(1)), fb = node(ctx.createGain()), lp = node(ctx.createBiquadFilter()), wet = node(ctx.createGain());
-    dry.gain.value = 0.75; delay.delayTime.value = 0.16; fb.gain.value = 0.45; lp.type = 'lowpass'; lp.frequency.value = 2400; wet.gain.value = 0.6;
-    input.connect(dry).connect(output); input.connect(delay); delay.connect(lp).connect(fb).connect(delay); lp.connect(wet).connect(output); return done();
-  }
-  return null;
+// 음성에 참가하는 순간 기다리지 않도록, 화면이 뜨고 잠시 뒤에 모델을 미리 불러와 둔다 (오디오 컨텍스트는 첫 터치에 깨어난다)
+addEventListener('load', () => { if (AC && voicePrefs.ns) setTimeout(() => nsLoad(), 1200); });
+const nsActive = () => voicePrefs.ns && nsState === 'ready' && nsCtx === actx;
+function makeNs(ctx, amt) { // 입력 → (AI 처리본 × 강도 + 원래 소리 × (1-강도)) → 출력
+  const input = ctx.createGain(), output = ctx.createGain(), wet = ctx.createGain(), dry = ctx.createGain(), delay = ctx.createDelay(0.1);
+  const ai = new AudioWorkletNode(ctx, NS_NODE, { processorOptions: { maxChannels: 1, wasmBinary: nsWasm }, channelCount: 1, channelCountMode: 'explicit', numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+  delay.delayTime.value = ctx.sampleRate === 48000 ? NS_LATENCY : 256 / 16000;
+  const setAmt = (a) => { wet.gain.value = a / 100; dry.gain.value = 1 - a / 100; };
+  setAmt(amt);
+  input.connect(ai).connect(wet).connect(output); input.connect(delay).connect(dry).connect(output);
+  return { input, output, setAmt, stop() { try { ai.port.postMessage('destroy'); } catch {} [input, ai, wet, dry, delay, output].forEach((n) => { try { n.disconnect(); } catch {} }); } };
 }
-// 입력 크기 → 필터 → 음소거 → 보낼 스트림
+/* ---------- 울림 줄이기 (방에서 울리는 소리) ----------
+   잡음 억제 모델은 울림을 따로 다루지 않아서, 늦게 따라오는 소리를 빼는 작은 워커(public/dereverb.js)를 뒤에 붙인다. 0%면 그래프에 넣지 않는다. */
+const DR_MAX = 2; // 슬라이더 100% 일 때 워커의 'amount'
+let drCtx = null, drFail = false;
+async function drLoad() {
+  try {
+    const ctx = audioCtx();
+    if (drCtx === ctx) return true;
+    if (drFail || !ctx.audioWorklet) return false;
+    await ctx.audioWorklet.addModule('/dereverb.js?v=' + BUILD); drCtx = ctx; return true;
+  } catch (e) { console.warn('울림 줄이기를 못 켜요:', e.message); drFail = true; return false; }
+}
+function makeDr(ctx, pct) {
+  const node = new AudioWorkletNode(ctx, 'dereverb', { channelCount: 1, channelCountMode: 'explicit', numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+  const setAmt = (p) => { node.parameters.get('amount').value = p / 100 * DR_MAX; };
+  setAmt(pct);
+  return { input: node, output: node, setAmt, stop() { try { node.disconnect(); } catch {} } };
+}
+// 입력 크기 → (AI 잡음 억제) → (울림 줄이기) → 필터 → 음소거 → 보낼 스트림
 function buildMicGraph(raw) {
   const ctx = audioCtx();
   const src = ctx.createMediaStreamSource(raw), inGain = ctx.createGain(), out = ctx.createGain(), dest = ctx.createMediaStreamDestination();
@@ -93,22 +92,27 @@ function buildMicGraph(raw) {
 }
 function wireFilter() {
   if (!mg) return;
-  mg.chain?.stop(); try { mg.inGain.disconnect(); } catch {}
-  mg.chain = makeFilter(actx, voicePrefs.filter);
-  if (mg.chain) { mg.inGain.connect(mg.chain.input); mg.chain.output.connect(mg.out); } else mg.inGain.connect(mg.out);
+  mg.ns?.stop(); mg.ns = null; mg.dr?.stop(); mg.dr = null; try { mg.inGain.disconnect(); } catch {}
+  let tail = mg.inGain;
+  if (nsActive()) { try { mg.ns = makeNs(actx, voicePrefs.nsAmt); tail.connect(mg.ns.input); tail = mg.ns.output; } catch (e) { console.warn(e); mg.ns = null; nsState = 'fail'; } }
+  if (voicePrefs.dr > 0 && drCtx === actx) { try { mg.dr = makeDr(actx, voicePrefs.dr); tail.connect(mg.dr.input); tail = mg.dr.output; } catch (e) { console.warn(e); mg.dr = null; drFail = true; } }
+  tail.connect(mg.out);
   try { mg.out.disconnect(actx.destination); } catch {}
   if (voicePrefs.monitor) mg.out.connect(actx.destination); // 내 목소리 들어 보기 (이어폰 권장)
 }
+const browserNs = () => voicePrefs.ns && !nsActive(); // AI 잡음 억제를 쓰면 브라우저 것은 끈다 (겹쳐 쓰면 목소리가 뭉개진다)
 function applyMicConstraints() { // 켜져 있는 마이크에도 바로 적용
-  micRaw?.getAudioTracks().forEach((t) => t.applyConstraints({ echoCancellation: voicePrefs.ec, noiseSuppression: voicePrefs.ns, autoGainControl: voicePrefs.agc }).catch(() => {}));
+  micRaw?.getAudioTracks().forEach((t) => t.applyConstraints({ echoCancellation: voicePrefs.ec, noiseSuppression: browserNs(), autoGainControl: voicePrefs.agc }).catch(() => {}));
 }
 
 let joining = false, joinGen = 0; // 마이크를 여는 동안 또 눌러도 두 번 열지 않고, 그 사이에 나가기를 눌렀으면 뒤늦게 참가되지 않게
 async function joinVoice() {
   if (mic || joining) return;
   joining = true; const gen = ++joinGen; let raw;
+  if (AC && voicePrefs.ns) await nsLoad(); // 마이크를 열기 전에 AI 잡음 억제를 준비해서, 쓸 수 있으면 브라우저 것을 끈다
+  if (AC && voicePrefs.dr) await drLoad();
   try {
-    raw = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: voicePrefs.ec, noiseSuppression: voicePrefs.ns, autoGainControl: voicePrefs.agc } });
+    raw = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: voicePrefs.ec, noiseSuppression: browserNs(), autoGainControl: voicePrefs.agc } });
   } catch { joining = false; return sys('마이크를 쓸 수 없어요. 브라우저의 마이크 권한과 https 접속을 확인해 주세요.'); }
   joining = false;
   if (gen !== joinGen || mic) { raw.getTracks().forEach((t) => t.stop()); return; }
@@ -124,7 +128,7 @@ function leaveVoice() {
   if (!mic) return;
   micRaw?.getTracks().forEach((t) => t.stop());
   mic.getTracks().forEach((t) => t.stop());
-  if (mg) { mg.chain?.stop(); [mg.src, mg.inGain, mg.out].forEach((n) => { try { n.disconnect(); } catch {} }); mg = null; }
+  if (mg) { mg.ns?.stop(); mg.dr?.stop(); [mg.src, mg.inGain, mg.out].forEach((n) => { try { n.disconnect(); } catch {} }); mg = null; }
   mic = micRaw = null; dropLevel(me);
   [...vpcs.keys()].forEach(closeVpc);
   send({ t: 'voice-leave' });
@@ -290,15 +294,25 @@ addEventListener('pagehide', () => { micRaw?.getTracks().forEach((t) => t.stop()
 
 // ---- 설정 창의 '음성' 항목 ----
 {
-  const sel = $('#vfSel');
-  for (const [k, label] of Object.entries(VOICE_FILTERS)) sel.append(el('option', { value: k, textContent: label }));
   const sync = () => {
-    sel.value = voicePrefs.filter; $('#micGain').value = voicePrefs.mic; $('#micGainOut').textContent = voicePrefs.mic + '%';
+    $('#micGain').value = voicePrefs.mic; $('#micGainOut').textContent = voicePrefs.mic + '%';
+    $('#nsAmt').value = voicePrefs.nsAmt; $('#nsAmtOut').textContent = voicePrefs.nsAmt + '%'; nsNote();
+    $('#drAmt').value = voicePrefs.dr; $('#drAmtOut').textContent = voicePrefs.dr + '%'; drNote();
     $('#nsOn').checked = voicePrefs.ns; $('#ecOn').checked = voicePrefs.ec; $('#agcOn').checked = voicePrefs.agc; $('#monOn').checked = voicePrefs.monitor;
   };
-  sel.onchange = () => { voicePrefs.filter = sel.value; saveVoicePrefs(); wireFilter(); };
   $('#micGain').oninput = (e) => { voicePrefs.mic = +e.target.value; $('#micGainOut').textContent = voicePrefs.mic + '%'; saveVoicePrefs(); if (mg) mg.inGain.gain.value = voicePrefs.mic / 100; };
-  for (const [id, key] of [['#nsOn', 'ns'], ['#ecOn', 'ec'], ['#agcOn', 'agc']]) $(id).onchange = (e) => { voicePrefs[key] = e.target.checked; saveVoicePrefs(); applyMicConstraints(); };
+  for (const [id, key] of [['#ecOn', 'ec'], ['#agcOn', 'agc']]) $(id).onchange = (e) => { voicePrefs[key] = e.target.checked; saveVoicePrefs(); applyMicConstraints(); };
+  const nsNote = () => { $('#nsNote').textContent = !voicePrefs.ns ? '' : nsState === 'fail' ? '이 브라우저에서는 AI 잡음 억제를 못 써서 브라우저 기본 잡음 억제를 쓰고 있어요.' : nsActive() ? 'AI 잡음 억제를 쓰고 있어요. 소리는 이 기기 안에서만 처리돼요.' : '음성에 참가하면 AI 잡음 억제가 켜져요.'; };
+  $('#nsOn').onchange = async (e) => { voicePrefs.ns = e.target.checked; saveVoicePrefs(); if (voicePrefs.ns && mg) await nsLoad(); wireFilter(); applyMicConstraints(); nsNote(); };
+  $('#nsAmt').oninput = (e) => { voicePrefs.nsAmt = +e.target.value; $('#nsAmtOut').textContent = voicePrefs.nsAmt + '%'; saveVoicePrefs(); mg?.ns?.setAmt(voicePrefs.nsAmt); };
+  const drNote = () => { $('#drNote').textContent = voicePrefs.dr > 0 && drFail ? '이 브라우저에서는 울림 줄이기를 쓸 수 없어요.' : ''; };
+  $('#drAmt').oninput = async (e) => {
+    voicePrefs.dr = +e.target.value; $('#drAmtOut').textContent = voicePrefs.dr + '%'; saveVoicePrefs();
+    if (voicePrefs.dr) await drLoad();
+    drNote();
+    if (!mg) return;
+    if (!!mg.dr === (voicePrefs.dr > 0 && drCtx === actx)) mg.dr?.setAmt(voicePrefs.dr); else wireFilter(); // 켜짐↔꺼짐이 바뀔 때만 그래프를 다시 짠다
+  };
   $('#monOn').onchange = (e) => { voicePrefs.monitor = e.target.checked; saveVoicePrefs(); wireFilter(); };
   sync();
 }

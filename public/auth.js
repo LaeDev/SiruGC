@@ -39,7 +39,11 @@ function authUi() {
       box.append(el('p', { textContent: '로그인과 가입은 아래 주소에서 할 수 있어요. 지금 주소에서는 게스트로 방에 들어올 수 있어요.' }), el('a', { className: 'btn sm', href: 'https://' + authInfo.host, textContent: authInfo.host + ' 로 가기' }));
     }
   }
+  const note = $('#gateNote');
+  note.hidden = !(!authInfo.allowed && authInfo.host); // 로그인·가입은 정해진 주소에서만 된다는 안내
+  note.replaceChildren('로그인과 가입은 ', el('a', { href: 'https://' + authInfo.host, textContent: authInfo.host }), ' 에서만 할 수 있어요. 지금 주소에서는 그룹방을 둘러보기만 할 수 있어요.');
   refresh();
+  joinAuto();
 }
 
 /* ---------- 로그인·가입·새 비밀번호 창 ---------- */
@@ -102,6 +106,7 @@ $('#authForm').onsubmit = async (e) => {
   $('#authGo').disabled = false;
   if (!r.ok) return void (msg.textContent = r.msg || '처리하지 못했어요.');
   set('acctName', r.name);
+  if (authMode === 'login' && (r.avatar || r.color)) set('profDone', r.name); // 서버에 프로필이 이미 있는 계정은 프로필 설정을 건너뛴다
   if (!r.mustChange) await e2eeAfterAuth(pw, authMode === 'login' ? r.keys : null); // 쪽지 보안 키: 로그인이면 맡겨 둔 키를 풀고, 가입이면 새로 만든다
   if (r.mustChange) { pendingTemp = pw; $('#authPw').value = $('#authPw2').value = ''; return setAuthMode('change'); } // 임시 비밀번호: 새로 정해야 입장할 수 있다
   $('#authPw').value = $('#authPw2').value = ''; closeAuth(); afterLogin();

@@ -89,5 +89,29 @@ function notifyInit(m) {
   send({ t: 'vis', v: !document.hidden });
   if (m.me.uid && get('pushOn') && pushSupported() && Notification.permission === 'granted') pushSend().then((ok) => ok || enablePush().then(() => renderNotify())).catch(() => {});
 }
+/* ---------- 알림 권한 미리 받기 ----------
+   로그인한 사람이 들어오면(그룹방 안내가 끝난 뒤) 한 번 안내 카드를 띄운다. "알림 켜기"를 누르면 그 클릭 안에서 바로 브라우저의 허용 창을 띄운다.
+   "나중에"는 3일 뒤에 다시 묻고, 브라우저에서 이미 차단했거나 허용했으면 묻지 않는다. 푸시를 못 쓰는 환경(iPhone의 Safari 탭 등)에서도 묻지 않는다. */
+const ASK_SNOOZE = 3 * 86400e3;
+const notifAskNeeded = () => !tourDirect() && !!meUid && pushSupported() && Notification.permission === 'default' && !get('pushOn') && !(Number(get('notifAsk')) > Date.now()) && !saverOn;
+function notifAskSoon(tries = 0) {
+  setTimeout(() => {
+    if (!notifAskNeeded()) return;
+    if (tourOn || document.hidden) return tries < 12 && notifAskSoon(tries + 1); // 안내 중이거나 화면을 안 보고 있으면 잠시 뒤에 다시
+    $('#naMsg').textContent = ''; $('#notifAsk').hidden = false; $('#naOn').focus({ preventScroll: true });
+  }, 2500);
+}
+const notifAskClose = (snooze) => { $('#notifAsk').hidden = true; if (snooze) set('notifAsk', String(Date.now() + ASK_SNOOZE)); };
+$('#naLater').onclick = () => notifAskClose(true);
+$('#naOn').onclick = async () => {
+  const btn = $('#naOn'), msg = $('#naMsg'); btn.disabled = true; msg.textContent = '브라우저에서 "허용"을 눌러 주세요…';
+  try {
+    const err = await enablePush(); // 이 클릭 안에서 Notification.requestPermission() 을 바로 부른다
+    if (err) { msg.textContent = err; if (Notification.permission !== 'denied') set('notifAsk', String(Date.now() + ASK_SNOOZE)); btn.disabled = false; btn.textContent = '다시 해 보기'; return; }
+    renderNotify('이 기기에서 알림을 받아요. "테스트 알림 보내기"로 확인해 보세요.'); notifAskClose(false);
+  } catch (e) { console.warn(e); msg.textContent = '알림을 켜지 못했어요. 설정 → 알림에서 다시 켜 볼 수 있어요.'; set('notifAsk', String(Date.now() + ASK_SNOOZE)); btn.disabled = false; btn.textContent = '다시 해 보기'; }
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('#notifAsk').hidden) notifAskClose(true); });
+
 // 화면을 보고 있는지 서버에 알린다: 보고 있으면 푸시 대신 앱 안에서 알려 주면 되기 때문
 document.addEventListener('visibilitychange', () => joined && send({ t: 'vis', v: !document.hidden }));

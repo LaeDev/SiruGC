@@ -40,7 +40,7 @@ const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15
       await call('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: mobile ? 2 : 1, mobile: !!mobile });
       if (mobile) await call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       return { js, call, name };
     }
@@ -61,11 +61,12 @@ const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15
     check(await C.js(`document.querySelector('#tab-users').click(), document.querySelector('#users li:nth-child(1) .tag.dev') !== null`), '다른 사람 화면에서도 보임');
     check(await B.js(`document.querySelector('#tab-users').click(), document.documentElement.scrollWidth - innerWidth <= 0`), '폰(390px)에서 기기 표시가 넘치지 않음');
     check(await B.js(`[...document.querySelectorAll('#users .urow')].every((r) => r.scrollWidth <= r.clientWidth + 1)`), '폰에서 줄 안에 이름과 표시가 모두 들어감');
+    check(await B.js(`(() => { users = users.concat([{ id: 'zz1', name: '긴이름테스트사용자', uid: 'aaaaaaaaaaaa', away: true, canQueue: true, acct: true, device: 'mobile', prev: '예전이름' }]); sharerId = 'zz1'; renderUsers(); const r = [...document.querySelectorAll('#users .urow')].pop(), nm = r.querySelector('.nm > span').getBoundingClientRect(), box = r.getBoundingClientRect(), tg = r.querySelector('.tags').getBoundingClientRect(); const res = { h: box.height, nameW: nm.width, tagsIn: tg.right <= box.right + 1 && tg.left >= box.left - 1, tags: r.querySelectorAll('.tag').length }; users.pop(); sharerId = null; renderUsers(); return res.tags >= 5 && res.h <= 110 && res.nameW >= 100 && res.tagsIn; })()`), '꼬리표가 5개 넘게 붙어도 닉네임이 줄어들지 않고(100px 이상), 줄 높이가 두 줄 안쪽이며, 꼬리표가 줄 밖으로 안 나감');
 
     console.log('영상 아래 음성 참가자 바');
     check(await A.js(`document.querySelector('#voiceBar').hidden`), '아무도 음성에 없으면 바가 숨겨져 있음');
-    await A.js(`document.querySelector('#voiceBtn').click()`); await wait(600);
-    await B.js(`document.querySelector('#voiceBtn').click()`);
+    await A.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`); await wait(600);
+    await B.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     check(await until(A, `document.querySelectorAll('#voiceBar .vp').length === 2 && !document.querySelector('#voiceBar').hidden`) && await until(B, `document.querySelectorAll('#voiceBar .vp').length === 2`), '음성에 들어간 두 사람이 양쪽 화면의 바에 보임');
     check(await until(C, `document.querySelectorAll('#voiceBar .vp').length === 2`), '음성에 안 들어간 사람(패드)에게도 누가 음성에 있는지 보임');
     const below = (p) => p.js(`(() => { const bar = document.querySelector('#voiceBar').getBoundingClientRect(); const above = ['#empty', '#ytWrap', '#screenWrap', '#seg'].map((s) => document.querySelector(s)).filter((e) => e && !e.hidden).map((e) => e.getBoundingClientRect().bottom); return above.length > 0 && bar.top >= Math.max(...above) - 1; })()`);
@@ -89,9 +90,9 @@ const IPAD = 'Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15
     await B.js(`document.querySelector('#tab-chat').click()`); await wait(300);
     check(await B.js(`(() => { const chat = document.querySelector('#chatIn').getBoundingClientRect(); return chat.bottom <= innerHeight && chat.top > 0; })()`), '폰에서 바가 생겨도 채팅 입력창이 화면 안에 그대로 보임');
 
-    await B.js(`document.querySelector('#voiceBtn').click()`);
+    await B.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     check(await until(A, `document.querySelectorAll('#voiceBar .vp').length === 1`), '나가면 바에서 사라짐');
-    await A.js(`document.querySelector('#voiceBtn').click()`);
+    await A.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     check(await until(C, `document.querySelector('#voiceBar').hidden`), '모두 나가면 바가 다시 숨겨짐');
     console.log('폰 화면이 꺼졌을 때(전원 버튼)');
     await A.js(`document.querySelector('#tab-users').click()`);

@@ -39,13 +39,13 @@ function snapshot() {
   const clean = (s) => String(s || '').trim().replace(/\s+/g, ' ');
   const nameOf = (e) => clean(e.getAttribute('aria-label') || e.getAttribute('title') || e.innerText || e.placeholder || e.value);
   const controls = [...document.querySelectorAll('button, a[href], input:not([type=hidden]):not([type=file]), select, textarea, summary, [role=tab]')]
-    .filter(vis).filter((e) => !e.classList.contains('skip')).map((e) => {
+    .filter(vis).filter((e) => !e.classList.contains('skip') && !e.closest('#setNav, #setBack, .dlg-h')).map((e) => { // 설정 창의 분류 목록·← 버튼은 폰이 목록→내용 방식이라 일부러 PC와 다르다
       const r = e.getBoundingClientRect();
       return { name: nameOf(e), tag: e.tagName.toLowerCase() + (e.type && e.tagName === 'INPUT' ? ':' + e.type : ''), label: clean(e.innerText), w: Math.round(r.width), h: Math.round(r.height),
         clipped: r.left < -1 || r.right > innerWidth + 1 };
     });
   const copy = [...document.querySelectorAll('h1,h2,h3,h4,p,label,legend,summary,.lbl,.tag,.sys,.bubble b,.t,.tc-n,.tc-d,.badge')]
-    .filter(vis).map((e) => clean(e.innerText)).filter(Boolean).map((t) => t.replace(/(오전|오후) \d+:\d+/g, '').trim()).filter(Boolean);
+    .filter(vis).filter((e) => !e.closest('#setNav, .dlg-h') && !e.matches('.set-page > h3')).map((e) => clean(e.innerText)).filter(Boolean).map((t) => t.replace(/(오전|오후) \d+:\d+/g, '').trim()).filter(Boolean);
   const SEL = ['body', '.btn', '.btn.primary', '.btn.go', '.btn.blue', '.stabs button[aria-selected=true]', '.bubble', '.tag', '.av', 'input[type=text]', '.now', '.frame', '.maker', '.tc', '.dot'];
   const styles = {};
   for (const sel of SEL) {
@@ -81,7 +81,7 @@ function snapshot() {
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: prof.w, height: prof.h, deviceScaleFactor: prof.dpr, mobile: prof.mobile, screenOrientation: prof.w > prof.h ? { type: 'landscapePrimary', angle: 90 } : { type: 'portraitPrimary', angle: 0 } });
       await call('Emulation.setTouchEmulationEnabled', { enabled: prof.mobile, maxTouchPoints: prof.mobile ? 5 : 0 });
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1500);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1500);
       const snap = async (stateKey) => {
         await wait(350);
         (results[prof.key] ||= {})[stateKey] = await js(`(${snapshot.toString()})()`);
@@ -105,7 +105,8 @@ function snapshot() {
       await js(`document.querySelector('#tab-chat').click()`);
       await js(`document.querySelector('#voiceBtn').click()`); await wait(1000);
       await snap('6 방 - 음성 참가 중');
-      await js(`document.querySelector('#settingsBtn').click()`); await snap('7 설정 창');
+      await js(`document.querySelector('#settingsBtn').click()`);
+      for (const cat of ['look', 'voice', 'hide', 'acct', 'app']) { await js(`setPage('${cat}')`); await snap('7 설정 창 ' + cat); } // 설정은 분류별 페이지(폰은 목록→내용)라서 분류마다 비교한다
       await js(`document.querySelector('#settings').close()`);
       guest.close();
       await raw('Target.closeTarget', { targetId }); await wait(700); // 이전 프로필의 접속이 정리될 시간

@@ -20,7 +20,7 @@ const UA = {
   samsung: 'Mozilla/5.0 (Linux; Android 14; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/24.0 Chrome/117.0.0.0 Mobile Safari/537.36',
 };
 
-const YT_STUB = "window.YT = { Player: class {\n  constructor(id, opts) {\n    this.opts = opts; this.vars = opts.playerVars; this.t = this.vars.start || 0; this.state = -1; this.muted = !!this.vars.mute; this.vol = 100; this.q = '';\n    if (!window.__lec) window.__lec = this;\n    setTimeout(() => { opts.events.onReady({}); this.state = 1; opts.events.onStateChange({ data: 1 }); }, 100);\n  }\n  playVideo() { this.state = 1; } pauseVideo() { this.state = 2; } mute() { this.muted = true; } unMute() { this.muted = false; } isMuted() { return this.muted; }\n  setVolume(v) { this.vol = v; } getVolume() { return this.vol; } getCurrentTime() { return this.t; } getDuration() { return 2700; }\n  seekTo(s) { this.t = s; } getPlayerState() { return this.state; } getVideoData() { return { title: '다항식의 연산 (1)' }; } setPlaybackQuality(q) { this.q = q; }\n} };\n";
+const YT_STUB = "window.YT = { Player: class {\n  constructor(id, opts) {\n    this.opts = opts; this.vars = opts.playerVars; this.t = 0; this.rate = 1; this.state = -1; this.muted = !!this.vars.mute; this.vol = 100; this.q = '';\n    if (!window.__lec) window.__lec = this;\n    setTimeout(() => { opts.events.onReady({}); this.state = 1; opts.events.onStateChange({ data: 1 }); }, 100);\n  }\n  playVideo() { const was = this.state; this.state = 1; if (was !== 1) this.opts.events.onStateChange({ data: 1 }); } pauseVideo() { if (this.state !== 2) { this.state = 2; this.opts.events.onStateChange({ data: 2 }); } } mute() { this.muted = true; } unMute() { this.muted = false; } isMuted() { return this.muted; }\n  setVolume(v) { this.vol = v; } getVolume() { return this.vol; } getCurrentTime() { return this.t; } getDuration() { return 2700; }\n  seekTo(s) { this.t = s; } setPlaybackRate(r) { this.rate = r; } getPlaybackRate() { return this.rate; } getPlayerState() { return this.state; } getVideoData() { return { title: '다항식의 연산 (1)' }; } setPlaybackQuality(q) { this.q = q; }\n} };\n";
 (async () => {
   const state = path.join(os.tmpdir(), `dmonly-${Date.now()}.json`);
   const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
@@ -59,7 +59,7 @@ const YT_STUB = "window.YT = { Player: class {\n  constructor(id, opts) {\n    t
       p.type = async (sel, text) => { await p.tap(sel); await call('Input.insertText', { text }); await wait(100); };
       p.shot = async (name) => { if (!SHOTS) return; const r = await call('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name + '.png'), Buffer.from(r.result.data, 'base64')); };
       p.until = async (expr, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await js(expr)) return true; await wait(200); } return false; };
-      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://127.0.0.1:${PORT}/?step=profile` }); await wait(1200);
       return p;
     }
     const noOverflow = `document.documentElement.scrollWidth <= innerWidth`;
@@ -74,22 +74,52 @@ const YT_STUB = "window.YT = { Player: class {\n  constructor(id, opts) {\n    t
 
     console.log('방에 들어오면 강의를 소리 없이 미리 재생');
     const G = await page(1280, 860, false); await G.type('#nameIn', '패닉손님'); await G.tap('#enter'); await wait(2200);
-    check(await G.js("!!window.__lec && __lec.vars.mute === 1 && __lec.vars.controls === 0 && __lec.vars.start === 0 && __lec.vars.end === 1800 && __lec.vars.autoplay === 1"), '입장하면 기본 강의(앞 30분)가 소리 없이 컨트롤 없이 재생을 시작함');
+    check(await G.js("!!window.__lec && __lec.opts.videoId === '2dI6uMcH5l8' && __lec.vars.mute === 1 && __lec.vars.controls === 0 && __lec.vars.fs === 0 && __lec.vars.disablekb === 1 && __lec.vars.autoplay === 1 && !('start' in __lec.vars) && !('end' in __lec.vars)"), '입장하면 지정한 강의 영상이 소리 없이 컨트롤 없이 미리 재생되기 시작함');
+    check(await G.js("__lec.t === 1350"), '영상의 한가운데(2700초 중 1350초)부터 재생됨');
     check(await G.js("__lec.muted && __lec.state === 1 && __lec.q === 'small' && getComputedStyle(document.querySelector('#lecture')).opacity === '0' && document.querySelector('#saver').hidden"), '미리 재생은 낮은 화질로 보이지 않게 돌아가고, 아직 화면 보호기는 안 뜸');
 
     console.log('패닉: 강의 화면과 강의 플레이어 컨트롤');
     await G.tap('#panicBtn'); await wait(700);
     check(await G.js("saverOn && !document.querySelector('#saver').hidden && document.querySelector('#saver').classList.contains('lec') && document.querySelector('#lecture').classList.contains('on') && soundOff && document.querySelector('#app').inert"), '패닉을 누르면 채팅 위로 강의가 뜨고 소리가 꺼지고 뒤 화면이 잠김');
-    check(await G.js("getComputedStyle(document.querySelector('#saverCanvas')).display === 'none' && document.querySelector('#lecTitle').textContent.includes('다항식')"), '별 화면 대신 강의가 보이고 제목이 나옴');
-    const m = await G.rect('#lecShield');
-    await G.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: m.x + 30, y: m.y + 30 }); await wait(400);
-    check(await G.js("document.querySelector('#saver').classList.contains('ui') && getComputedStyle(document.querySelector('#lecBar')).opacity === '1'"), '마우스를 움직이면 강의 플레이어 컨트롤이 나옴');
+    check(await G.js("getComputedStyle(document.querySelector('#saverCanvas')).display === 'none' && !document.querySelector('#lecTitle') && !document.querySelector('#saver').textContent.toLowerCase().includes('youtube')"), '별 화면 대신 강의가 보이고, 유튜브의 제목·이름이 화면 요소에 없음');
+    await wait(200);
+    await G.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 100, y: 100 }); await wait(300);
+    check(await G.js("(() => { const b = document.querySelector('#lecBar').getBoundingClientRect(), v = document.querySelector('#lecture').getBoundingClientRect(); return getComputedStyle(document.querySelector('#lecBar')).opacity === '1' && b.bottom === innerHeight && b.height >= 100 && v.bottom <= b.top + 1 && ['#lecPlay', '#lecStop', '#lecBack', '#lecFwd', '#lecMute', '#lecSeek', '#lecRates'].every((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.width > 0 && r.top >= b.top && r.bottom <= b.bottom; }); })()"), '아래의 어두운 컨트롤 판이 늘 보이고 영상 칸은 그 위쪽만 씀 (재생·정지·10초·속도·볼륨·재생 위치)');
+    check(await G.js("(() => { const f = document.createElement('iframe'); const L = document.querySelector('#lecture'); L.append(f); const c = L.getBoundingClientRect(), r = f.getBoundingClientRect(), pe = getComputedStyle(f).pointerEvents; L.style.setProperty('--z', 1.5); const big = f.getBoundingClientRect(); L.style.setProperty('--z', 1); f.remove(); return r.width <= c.width + 1 && r.height <= c.height + 1 && Math.abs(r.width / r.height - 16 / 9) < 0.02 && big.width > c.width && pe === 'none'; })()"), '영상은 칸 안에 통째로 들어가고(16:9), 화면크기를 키우면 칸 밖으로 넘쳐 잘리며, 유튜브 화면 자체는 직접 조작이 안 됨');
     check(await G.js("getComputedStyle(document.querySelector('#lecShield')).pointerEvents !== 'none' && document.elementFromPoint(640, 300) === document.querySelector('#lecShield')"), '영상 위는 투명한 막이 덮고 있어서 유튜브 자신의 컨트롤이 나올 수 없음');
     await G.shot('1-lecture-desktop');
     await G.tap('#lecPlay'); await wait(300);
     check(await G.js("__lec.state === 2 && document.querySelector('#lecPlay').getAttribute('aria-label') === '재생'"), '정지 버튼: 영상이 멈추고 버튼이 "재생"으로 바뀜');
     await G.tap('#lecPlay'); await wait(300);
     check(await G.js("__lec.state === 1"), '재생 버튼: 다시 재생됨');
+    check(await G.js("document.querySelector('#lecCover').classList.contains('on') && document.querySelector('#lecCover').classList.contains('busy')"), '멈췄다 다시 재생한 직후에는 유튜브가 자기 화면(제목·공유·추천)을 그리는 동안 검은 막이 영상을 덮음');
+    await wait(6000);
+    check(await G.js("!document.querySelector('#lecCover').classList.contains('on')"), '그 시간이 지나면 영상이 보임');
+    await G.tap('#lecBack'); check(await G.js("Math.abs(__lec.t - 1340) < 3 && document.querySelector('#lecCover').classList.contains('on')"), '10초 뒤로 (건너뛴 직후에도 유튜브 화면을 가리기 위해 검은 막)');
+    await G.tap('#lecFwd'); await G.tap('#lecFwd'); check(await G.js("Math.abs(__lec.t - 1360) < 3"), '10초 앞으로');
+    await G.js("document.querySelectorAll('#lecRates button')[4].click()"); await wait(200);
+    check(await G.js("__lec.rate === 1.5 && document.querySelectorAll('#lecRates button')[4].getAttribute('aria-pressed') === 'true'"), '재생 속도 점을 누르면 그 속도로 바뀌고 표시됨');
+    await G.tap('#lecSeek'); check(await G.js("__lec.t > 100 && __lec.t < 2600"), '재생 위치 막대를 누르면 그 자리로 이동');
+    await G.js("__lec.rate = 1; lecUi()");
+    await G.tap('#lecStop'); await wait(300);
+    check(await G.js("__lec.state === 2 && __lec.t === 1350 && document.querySelector('#lecCover').classList.contains('on')"), '정지 버튼: 멈추고 처음 자리(한가운데)로 돌아가며, 멈춘 동안은 검은 화면이 영상을 덮음 (유튜브의 일시정지 추천이 안 보이게)');
+    await G.tap('#lecPlay'); await wait(300);
+    await G.js("(() => { const s = document.querySelector('#lecStep'); s.value = '30'; s.dispatchEvent(new Event('change')); })()");
+    await G.tap('#lecFwd'); check(await G.js("Math.abs(__lec.t - 1380) < 3 && get('lecStep') === '30' && document.querySelector('#lecFwd').getAttribute('aria-label') === '30초 앞으로'"), '화면이동을 30초로 바꾸면 앞으로 버튼이 30초씩 가고 설정이 저장됨');
+    await G.js("__lec.t = 1350; (() => { const s = document.querySelector('#lecStep'); s.value = '10'; s.dispatchEvent(new Event('change')); })()");
+    await G.tap('#lecLoop'); await G.js('__lec.t = 1362'); await G.tap('#lecLoop'); await wait(100);
+    check(await G.js("document.querySelector('#lecLoop').textContent.includes('22:30') && document.querySelector('#lecLoop').textContent.includes('22:42')"), '구간반복: 시작점과 끝점을 정하면 표시됨');
+    await G.js('__lec.t = 1363'); await wait(500);
+    check(await G.js("Math.abs(__lec.t - 1350) < 2"), '끝점을 넘으면 시작점으로 되돌아가 반복함');
+    await G.tap('#lecLoop'); check(await G.js("document.querySelector('#lecLoop').textContent === '구간반복' && document.querySelector('#lecLoop').getAttribute('aria-pressed') === 'false'"), '한 번 더 누르면 구간반복이 풀림');
+    await G.js('__lec.t = 1400; lecUi()'); await G.tap('#lecMark'); await G.js('__lec.t = 1500; lecUi()');
+    check(await G.js("[...document.querySelectorAll('#lecMarks button')].map((b) => b.textContent).join() === '23:20'"), '북마크추가: 지금 자리가 목록에 생김');
+    await G.tap('#lecMarks button'); check(await G.js("Math.abs(__lec.t - 1400) < 2"), '북마크를 누르면 그 자리로 이동함');
+    await G.js('lecUi()'); check(await G.js("document.querySelector('#lecMark').textContent === '북마크해제'"), '북마크 자리에서는 버튼이 해제로 바뀜');
+    await G.tap('#lecMark'); check(await G.js("document.querySelectorAll('#lecMarks button').length === 0"), '북마크해제로 지움');
+    await G.tap('#lecSizes button:nth-child(2)'); check(await G.js("document.querySelector('#lecture').style.getPropertyValue('--z') === '1.3' && get('lecSize') === 'S2' && document.querySelector('#lecSizes button:nth-child(2)').getAttribute('aria-pressed') === 'true'"), '화면크기 S2: 영상이 커지고 저장됨');
+    await G.tap('#lecSizes button:nth-child(5)'); check(await G.js("document.querySelector('#lecture').style.getPropertyValue('--z') === '1' && !!document.querySelector('#lecFull')"), '화면크기 일반: 원래 크기로, 전체 화면 버튼도 있음');
+    await G.js('__lec.t = 1350');
     await G.js("(() => { const v = document.querySelector('#lecVol'); v.value = 40; v.dispatchEvent(new Event('input')); })()"); await wait(200);
     check(await G.js("__lec.vol === 40 && !__lec.muted"), '볼륨을 올리면 소리가 켜지고 크기가 그대로 전달됨');
     await G.tap('#lecMute'); await wait(200);
@@ -165,6 +195,30 @@ const YT_STUB = "window.YT = { Player: class {\n  constructor(id, opts) {\n    t
     check(await P.js("(() => { const f = document.querySelector('#lecAuth').getBoundingClientRect(); return !document.querySelector('#lecAuth').hidden && f.left >= 0 && f.right <= innerWidth && f.top >= 0 && f.bottom <= innerHeight; })()"), '폰에서 해제 화면이 화면 안에 들어옴');
     await P.js("document.querySelector('#lecPw').value = 'pw-패닉폰-12345'"); await P.js("document.querySelector('#lecAuth').requestSubmit()"); await wait(1300);
     check(await P.js("!saverOn && !document.querySelector('#saver').classList.contains('rot')"), '풀면 원래대로 돌아옴');
+    console.log('iPhone 홈 화면 앱: 가로로 든 채 (노치·홈 바 안전 영역)');
+    const L = await page(844, 390, true, UA.iphone); await L.call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await L.call('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 47, bottom: 21, right: 47 } });
+    await L.login('패닉가로'); await L.js('location.reload()'); await wait(1500); await L.login('패닉가로'); await L.tap('#enter'); await wait(2200);
+    await L.tap('#panicBtn'); await wait(900);
+    check(await L.js("saverOn && !document.querySelector('#saver').classList.contains('rot') && document.documentElement.classList.contains('saver-on') && getComputedStyle(document.querySelector('#app')).visibility === 'hidden'"), '가로로 든 폰: 돌리지 않고 그대로 보이며, 뒤의 방은 아예 안 그려짐');
+    check(await L.js("(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), v = r('#lecture'), b = r('#lecBar'); return v.left >= 46 && innerWidth - v.right >= 46 && Math.abs(v.bottom - b.top) <= 1 && b.bottom <= innerHeight + 1 && ['#lecPlay', '#lecMute', '#lecRate'].every((x) => { const e = r(x); return e.left >= 46 && e.right <= innerWidth - 46 && e.bottom <= innerHeight - 20; }); })()"), '영상과 컨트롤이 좌우 노치 여백(47px)과 아래 홈 바 여백(21px) 안에 들어오고, 영상과 컨트롤 판 사이에 틈이 없음');
+    await L.shot('6-landscape-iphone');
+    await press(L, 10600); await wait(500);
+    check(await L.js("!document.querySelector('#lecAuth').hidden && getComputedStyle(document.querySelector('#app')).visibility === 'hidden' && getComputedStyle(document.querySelector('#lecBar')).display !== 'none' && document.querySelector('#lecture').classList.contains('on')"), '비밀번호를 묻는 동안에도 강의 화면과 컨트롤 판이 그대로 보이고 뒤의 방은 가려져 있음');
+    check(await L.js("(() => { const e = document.elementFromPoint(innerWidth / 2, innerHeight - 3); return !e || !e.closest('#app, #join'); })()"), '화면 맨 아래 띠를 눌러 봐도 뒤의 방이 아님');
+    check(await L.js("(() => { const f = document.querySelector('#lecAuth').getBoundingClientRect(); return f.top >= 0 && f.bottom <= innerHeight && f.left >= 0 && f.right <= innerWidth; })()"), '비밀번호 칸이 화면 안에 들어옴 (낮은 가로 화면)');
+    await L.shot('7-landscape-asking');
+    await L.js("document.querySelector('#lecCancel').click()"); await L.js("unlockSaver()");
+
+    console.log('iPhone 홈 화면 앱: 세로로 든 채 (돌려서 보여 줌, 안전 영역)');
+    const V = await page(390, 844, true, UA.iphone); await V.call('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await V.call('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, left: 0, bottom: 34, right: 0 } });
+    await V.login('패닉세로'); await V.js('location.reload()'); await wait(1500); await V.login('패닉세로'); await V.tap('#enter'); await wait(2200);
+    await V.tap('#panicBtn'); await wait(900);
+    check(await V.js("(() => { const b = document.querySelector('#saver').getBoundingClientRect(); return document.querySelector('#saver').classList.contains('rot') && Math.abs(b.width - innerWidth) <= 1 && Math.abs(b.height - innerHeight) <= 1; })()"), '세로로 든 폰: 화면을 돌려 보이는 영역에 딱 맞음');
+    check(await V.js("(() => { const r = (s) => document.querySelector(s).getBoundingClientRect(), v = r('#lecture'); return v.top >= 46 && v.bottom <= innerHeight - 33 && ['#lecPlay', '#lecMute', '#lecRate'].every((x) => { const e = r(x); return e.top >= 46 && e.bottom <= innerHeight - 33 && e.left >= 0 && e.right <= innerWidth; }); })()"), '돌린 화면의 영상과 컨트롤이 위 노치(47px)와 아래 홈 바(34px) 여백 안에 들어옴');
+    await V.shot('8-portrait-iphone-rotated');
+    await V.js("unlockSaver()");
     browser.close();
   } finally { chrome.kill(); try { require("child_process").execSync(`taskkill /pid ${chrome.pid} /T /F`, { stdio: "ignore" }); } catch {} try { fs.rmSync(prof, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch {}  srv.kill(); fs.rmSync(state, { force: true }); }
   console.log(failed ? `\n실패 ${failed}건` : '\n모두 통과'); process.exit(failed ? 1 : 0);

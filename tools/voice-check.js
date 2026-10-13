@@ -1,8 +1,7 @@
-// 음성 필터와 사람별 음량이 실제로 동작하는지 확인한다.
-//  1) 목소리 높낮이: 440Hz 사인파를 필터에 넣고 나온 소리의 주파수를 잰다 (높게는 올라가고 낮게는 내려가야 함)
-//  2) 다른 효과(로봇/라디오/동굴)가 소리를 내는지
-//  3) 브라우저 두 개: 필터를 바꿔도 연결이 유지되고 소리가 계속 가는지, 마이크 입력 크기 0이면 조용해지는지
-//  4) 사람별 음량 슬라이더(0~200%)가 gain에 반영되고, 모든 소리 끄기가 이기고, 저장되는지
+// 음성 연결과 마이크 설정·사람별 음량이 실제로 동작하는지 확인한다.
+// (이 도구의 가짜 마이크는 삑 소리라서 AI 잡음 억제가 지워 버린다. 소리 전달만 보려고 억제를 끄고 시험한다. 억제는 tools/noise-check.js 가 따로 본다)
+//  1) 브라우저 두 개: 마이크 설정(내 목소리 들어 보기·에코 제거)을 바꿔도 연결이 유지되고 소리가 계속 가는지, 마이크 입력 크기 0이면 조용해지는지
+//  2) 사람별 음량 슬라이더(0~200%)가 gain에 반영되고, 모든 소리 끄기가 이기고, 저장되는지
 // 실행: node tools/voice-check.js   (CHROME 환경변수로 chrome.exe 경로 지정 가능)
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -39,7 +38,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       return { js, call };
     }
@@ -47,30 +46,9 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
 
     const A = await page('에이'), B = await page('비이');
 
-    console.log('목소리 높낮이 (440Hz 사인파를 넣고 나온 소리의 주파수를 잼)');
-    const measure = (ratio) => A.js(`(async () => {
-      const sr = 44100, ctx = new OfflineAudioContext(1, sr * 2, sr), osc = ctx.createOscillator();
-      osc.frequency.value = 440; osc.start();
-      const p = makePitchShifter(ctx, ${ratio}); osc.connect(p.input); p.output.connect(ctx.destination);
-      const d = (await ctx.startRendering()).getChannelData(0);
-      let z = 0, prev = d[sr]; for (let i = sr + 1; i < sr * 2; i++) { if ((prev < 0) !== (d[i] < 0)) z++; prev = d[i]; }
-      return z / 2; })()`);
-    const high = await measure(1.35), low = await measure(0.75), same = await measure(1);
-    check(Math.abs(high - 594) / 594 < 0.12, `높은 목소리: 440Hz → ${Math.round(high)}Hz (목표 594Hz ±12%)`);
-    check(Math.abs(low - 330) / 330 < 0.12, `낮은 목소리: 440Hz → ${Math.round(low)}Hz (목표 330Hz ±12%)`);
-    check(high > same * 1.2 && low < same * 0.85, `높게는 올라가고 낮게는 내려감 (${Math.round(low)} < ${Math.round(same)} < ${Math.round(high)})`);
-    for (const kind of ['robot', 'radio', 'cave']) {
-      const rms = await A.js(`(async () => {
-        const sr = 44100, ctx = new OfflineAudioContext(1, sr, sr), osc = ctx.createOscillator(); osc.frequency.value = 300; osc.start();
-        const f = makeFilter(ctx, '${kind}'); osc.connect(f.input); f.output.connect(ctx.destination);
-        const d = (await ctx.startRendering()).getChannelData(0); let s = 0, bad = 0; for (let i = sr / 2; i < sr; i++) { s += d[i] * d[i]; if (!Number.isFinite(d[i])) bad++; }
-        return bad ? -1 : Math.sqrt(s / (sr / 2)); })()`);
-      check(rms > 0.02 && rms < 2, `${kind} 필터가 소리를 냄 (세기 ${rms.toFixed(3)})`);
-    }
-
-    console.log('필터를 바꿔도 연결과 소리가 유지되는가 (브라우저 2개)');
-    await A.js(`document.querySelector('#voiceBtn').click()`); await wait(700);
-    await B.js(`document.querySelector('#voiceBtn').click()`);
+    console.log('설정을 바꿔도 연결과 소리가 유지되는가 (브라우저 2개)');
+    await A.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`); await wait(700);
+    await B.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     check(await until(A, `[...vpcs.values()].some((v) => v.pc.connectionState === 'connected')`), '두 사람이 음성으로 연결됨');
     // 스피커로 가기 직전(gain 바로 뒤)의 신호 크기를 직접 잰다: 필터·마이크 크기·사람별 음량이 실제로 소리에 반영되는지 보여 준다 (0~128)
     const peak = (p, ms = 3000) => p.js(`new Promise((res) => {
@@ -81,17 +59,17 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     const base = await peak(B);
     check(base > 3, `원래 목소리가 B의 스피커 쪽으로 나옴 (신호 크기 ${base.toFixed(1)})`);
     await A.js(`window.__pc0 = vpcs.values().next().value.pc`);
-    for (const kind of ['high', 'robot', 'cave', 'off']) {
-      await A.js(`(() => { const s = document.querySelector('#vfSel'); s.value = '${kind}'; s.dispatchEvent(new Event('change')); })()`);
+    for (const [id, on] of [['#monOn', true], ['#monOn', false], ['#ecOn', false], ['#ecOn', true]]) { // 마이크 처리 그래프를 다시 짜는 설정들
+      await A.js(`(() => { const c = document.querySelector('${id}'); c.checked = ${on}; c.dispatchEvent(new Event('change')); })()`);
       const d = await peak(B, 2600);
-      check(d > 2, `필터 "${kind}"로 바꿔도 소리가 계속 나옴 (신호 크기 ${d.toFixed(1)})`);
+      check(d > 2, `${id} 를 ${on ? '켜' : '꺼'}도 소리가 계속 나옴 (신호 크기 ${d.toFixed(1)})`);
     }
-    check(await A.js(`vpcs.values().next().value.pc === window.__pc0 && vpcs.size === 1`), '필터를 바꿔도 연결을 다시 맺지 않음 (같은 연결 유지)');
+    check(await A.js(`vpcs.values().next().value.pc === window.__pc0 && vpcs.size === 1`), '마이크 설정을 바꿔도 연결을 다시 맺지 않음 (같은 연결 유지)');
     await A.js(`(() => { const r = document.querySelector('#micGain'); r.value = 0; r.dispatchEvent(new Event('input')); })()`);
     const quiet = await peak(B, 2600);
     check(quiet < 1.5, `마이크 입력 크기 0%면 조용해짐 (신호 크기 ${quiet.toFixed(1)})`);
     await A.js(`(() => { const r = document.querySelector('#micGain'); r.value = 100; r.dispatchEvent(new Event('input')); })()`);
-    check(await A.js(`JSON.parse(localStorage.voicePrefs).filter === 'off' && JSON.parse(localStorage.voicePrefs).mic === 100`), '필터와 입력 크기 설정이 이 기기에 저장됨');
+    check(await A.js(`JSON.parse(localStorage.voicePrefs).mic === 100 && !('filter' in JSON.parse(localStorage.voicePrefs))`), '입력 크기 설정이 이 기기에 저장되고, 옛 목소리 필터 설정은 남지 않음');
     await A.js(`(() => { const c = document.querySelector('#ecOn'); c.checked = false; c.dispatchEvent(new Event('change')); })()`);
     check(await A.js(`JSON.parse(localStorage.voicePrefs).ec === false`), '에코 제거 같은 마이크 처리 옵션도 저장됨');
 

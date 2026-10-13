@@ -39,7 +39,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
       await call('Page.enable'); await call('Runtime.enable');
       await call('Emulation.setDeviceMetricsOverride', { width: 1000, height: 760, deviceScaleFactor: 1, mobile: false });
       const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log(`[${name}] JS 오류:`, r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
-      await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+      await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
       await js(`(() => { document.querySelector('#nameIn').value = '${name}'; document.querySelector('#joinForm').requestSubmit(); })()`); await wait(1000);
       return { js, call, name };
     }
@@ -50,7 +50,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     // 한 사람의 "음성" 버튼을 무작위 간격으로 누른다. 가끔은 같은 순간에 두 번(연타)
     const churn = async (p) => {
       for (let i = 0; i < ROUNDS; i++) {
-        await p.js(`document.querySelector('#voiceBtn').click(); ${Math.random() < 0.25 ? "document.querySelector('#voiceBtn').click();" : ''} 0`);
+        await p.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click()); ${Math.random() < 0.25 ? "(voicePrefs.ns = false, document.querySelector('#voiceBtn').click());" : ''} 0`);
         await wait(Math.random() * 450);
       }
     };
@@ -58,7 +58,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     console.log(`세 명이 음성에서 ${ROUNDS}번씩 무작위로 나갔다 들어오기 (연타 포함)`);
     await Promise.all(P.map(churn));
     // 마지막 상태를 정한다: 모두 음성에 들어가 있게
-    for (const p of P) if (!(await inVoiceNow(p))) await p.js(`document.querySelector('#voiceBtn').click()`);
+    for (const p of P) if (!(await inVoiceNow(p))) await p.js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     await wait(500);
     check((await Promise.all(P.map(inVoiceNow))).every(Boolean), '마지막에 세 명 모두 음성에 있음');
 
@@ -82,12 +82,12 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await P[0].js(`micRaw.getAudioTracks().filter((t) => t.readyState === 'live').length === 1`), '마이크 트랙이 하나만 켜져 있음 (연타해도 겹쳐 열지 않음)');
 
     console.log('나간 사람은 조용히 정리됨');
-    await P[2].js(`document.querySelector('#voiceBtn').click()`); await wait(1500);
+    await P[2].js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`); await wait(1500);
     check(await P[2].js(`!inVoice() && vpcs.size === 0 && !micRaw`), '나가면 마이크와 연결이 모두 정리됨');
     check((await Promise.all([P[0], P[1]].map((p) => p.js(`vpcs.size === 1 && !vpcs.has('${'x'}')`)))).every(Boolean), '남은 두 사람은 연결 하나씩만 유지');
 
     console.log('AudioContext가 멈춰도(suspended) 소리가 복구됨');
-    await P[2].js(`document.querySelector('#voiceBtn').click()`);
+    await P[2].js(`(voicePrefs.ns = false, document.querySelector('#voiceBtn').click())`);
     await until(async () => (await Promise.all(P.map(connected))).every(Boolean));
     // 브라우저가 자동 재개를 막는 상황(제스처가 필요한 iOS 등)을 흉내: resume을 잠시 무력화하고 멈춘다
     await P[1].js(`(() => { window.__resume = actx.resume.bind(actx); actx.resume = () => Promise.resolve(); return actx.suspend(); })()`); await wait(800);

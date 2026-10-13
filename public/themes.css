@@ -7,9 +7,9 @@
 /* 기기 설정이 라이트이고 사용자가 따로 고르지 않았을 때 */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    --bg:#f6f2ff; --surface:#ffffff; --surface-2:#ebe5fb; --line:#cfc4ea;
-    --text:#1e1636; --muted:#5b4f80; --accent:#ffb84d; --on-accent:#2a1b05; --accent-text:#8a4b00;
-    --danger:#b3263a; --focus:#5b3df5; color-scheme:light;
+    --bg:#ffffff; --surface:#f2f3f5; --surface-2:#e3e5e8; --line:#c4c7ce;
+    --text:#313338; --muted:#4e5058; --accent:#4752c4; --on-accent:#ffffff; --accent-text:#4752c4;
+    --danger:#c62d37; --focus:#4752c4; color-scheme:light;
     --ok:#15803d; --on-ok:#ffffff; --info:#1d4ed8; --on-info:#ffffff; --on-danger:#ffffff;
   }
 }
@@ -39,7 +39,7 @@
   --danger:#c62d37; --focus:#4752c4; color-scheme:light;
   --r-ctl:8px; --r-box:12px;
 }
-[data-theme^="flat-"] .qlist li.dragging { box-shadow:none; outline:1.5px solid var(--line); }
+[data-theme^="flat-"] .qlist li.dragging, :root:not([data-theme]) .qlist li.dragging { box-shadow:none; outline:1.5px solid var(--line); }
 
 [data-theme="dracula"] {
   --bg:#282a36; --surface:#343746; --surface-2:#44475a; --line:#6272a4;
@@ -106,4 +106,11 @@
 [data-theme="lamp-light"], [data-theme="flat-light"], [data-theme="nord-light"], [data-theme="solarized-light"],
 [data-theme="gruvbox-light"], [data-theme="catppuccin-latte"], [data-theme="rose-pine-dawn"] {
   --ok:#15803d; --on-ok:#ffffff; --info:#1d4ed8; --on-info:#ffffff; --on-danger:#ffffff;
+}
+
+/* 나만의 테마: 실제 색은 설정에서 고른 배경색·강조색으로 계산해 <html style>에 넣는다(settings.js). 아래는 그 전(또는 JS 없이)의 바탕값 */
+[data-theme="custom"] {
+  --bg:#1e1f22; --surface:#2b2d31; --surface-2:#383a40; --line:#41434a;
+  --text:#f2f3f5; --muted:#b5bac1; --accent:#4f5bd5; --on-accent:#ffffff; --accent-text:#a8b1ff;
+  --danger:#fa777c; --focus:#c9cdfb; color-scheme:dark; --r-ctl:8px; --r-box:12px;
 }

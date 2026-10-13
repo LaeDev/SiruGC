@@ -37,7 +37,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     await call('Page.enable'); await call('Runtime.enable');
     const js = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) console.log('JS 오류:', r.result.exceptionDetails.exception?.description); return r.result?.result?.value; };
     const until = async (fn, ms = 12000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await fn()) return true; await wait(200); } return false; };
-    await call('Page.navigate', { url: `http://localhost:${PORT}` }); await wait(1200);
+    await call('Page.navigate', { url: `http://localhost:${PORT}/?step=profile` }); await wait(1200);
     await js(`(() => { document.querySelector('#nameIn').value = '불안'; document.querySelector('#joinForm').requestSubmit(); })()`);
     check(await until(() => js(`joined && ws.readyState === 1`)), '입장함');
 
