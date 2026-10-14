@@ -12,7 +12,7 @@ let dmMembers = [];          // 새 쪽지 상대 고르기용 전체 회원
 // 쪽지만 쓰는 사람은 방 참가자 목록을 받지 않아서, 대화를 열 때 서버가 알려 준 접속 여부를 쓴다
 const dmOnline = (uid) => users.some((u) => u.uid === uid) || (dmOnly && !!dmPeers.get(uid)?.online);
 const dmUnread = () => [...dmPeers.values()].reduce((n, p) => n + (p.unread || 0), 0);
-const peerUser = (p) => ({ name: p.name, color: p.color, avatar: `/a/${p.uid}` }); // 접속 중이 아닌 사람의 프사도 서버에서 받는다
+const peerUser = (p) => ({ name: p.name, color: p.color, avatar: `/a/${p.uid}` + (p.av ? '?v=' + p.av : '') }); // ?v= 는 프사가 바뀔 때 달라지는 번호 // 접속 중이 아닌 사람의 프사도 서버에서 받는다
 const dmTime = (ts) => {
   const d = new Date(ts);
   return d.toDateString() === new Date().toDateString()
@@ -172,18 +172,20 @@ $('#encDiff').onclick = () => { set(safeKey(dmOpenUid), ''); $('#encState').text
 
 /* ---------- 대화창 ---------- */
 function dmBubble(msg) {
-  const mine = msg.from === meUid;
+  const mine = msg.from === meUid, dmUrls = { urls: [] }; // 글 속 링크를 모아 카드로 보여 준다
   const p = dmPeers.get(mine ? msg.to : msg.from);
   const who = mine ? { ...(users.find((u) => u.id === me) || {}), name: '나' } : peerUser(p || { uid: msg.from, name: '?' });
   const bubble = el('div', { className: 'bubble' },
-    el('header', {}, el('b', { textContent: mine ? '나' : who.name }), el('time', { textContent: dmTime(msg.ts) })),
-    ...(!msg.pt ? [el('p', { className: 'hint', textContent: '이 기기에서는 풀 수 없는 쪽지예요. 이 기기에 보안 키가 없거나, 상대의 키가 바뀌기 전에 온 쪽지예요.' })] : msg.pt.t ? [el('p', { textContent: msg.pt.t })] : []));
+    el('header', {}, el('b', { textContent: mine ? '나' : who.name }), el('time', { textContent: dmTime(msg.ts) + (msg.edited ? ' · 수정됨' : '') })),
+    ...(!msg.pt ? [el('p', { className: 'hint', textContent: '이 기기에서는 풀 수 없는 쪽지예요. 이 기기에 보안 키가 없거나, 상대의 키가 바뀌기 전에 온 쪽지예요.' })] : msg.pt.t ? (typeof richNodes === 'function' ? richNodes(msg.pt.t, dmUrls) : [el('p', { textContent: msg.pt.t })]) : []));
+  if (msg.pt?.t && typeof embedNodes === 'function') bubble.append(...embedNodes(dmUrls.urls, { dm: true }));
   if (msg.pt?.m) bubble.append(mediaNode(msg.pt.m));
   if (mine) { // 내 쪽지는 눌러서(또는 Enter) 삭제 메뉴를 연다
-    const act = el('div', { className: 'mact', hidden: true }, el('button', { type: 'button', className: 'btn sm danger', textContent: '이 쪽지 삭제', onclick: () => confirm('이 쪽지를 지울까요? 상대 화면에서도 사라져요.') && send({ t: 'dm-delete', with: msg.to, id: msg.id }) }));
+    const canEdit = !!msg.pt && !!msg.pt.t && !msg.pt.m; // 글만 있는 쪽지만 고칠 수 있다 (사진·동영상 쪽지는 지우고 다시 보낸다)
+    const act = el('div', { className: 'mact', hidden: true }, canEdit ? el('button', { type: 'button', className: 'btn sm', textContent: '수정', onclick: () => { act.hidden = true; dmEditStart(msg, bubble); } }) : '', el('button', { type: 'button', className: 'btn sm danger', textContent: '이 쪽지 삭제', onclick: () => confirm('이 쪽지를 지울까요? 상대 화면에서도 사라져요.') && send({ t: 'dm-delete', with: msg.to, id: msg.id }) }));
     bubble.append(act);
     bubble.tabIndex = 0; bubble.setAttribute('role', 'group'); bubble.setAttribute('aria-label', '내 쪽지. 누르면 삭제 메뉴가 열려요');
-    const toggle = (e) => { if (e.target.closest('.media, .mact')) return; act.hidden = !act.hidden; };
+    const toggle = (e) => { if (e.target.closest('.media, .mact, .dm-edit, .spoiler, a')) return; act.hidden = !act.hidden; };
     bubble.addEventListener('click', toggle);
     bubble.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === bubble) toggle(e); });
   }
@@ -191,6 +193,31 @@ function dmBubble(msg) {
   const row = el('div', { className: 'm' + (mine ? ' mine' : '') }, mine ? avEl(who) : paintAvatar(el('span', { className: 'av' }), who), bubble);
   row.dataset.id = msg.id;
   return row;
+}
+// 내 쪽지 고치기: 말풍선 안에서 바로 고친다. 새로 암호화해서 보내면 서버가 'dm-edited'로 알려 줘서 모두의 화면이 새 내용으로 바뀐다 (이전 내용은 남지 않는다)
+function dmEditStart(msg, bubble) {
+  if (bubble.querySelector('.dm-edit')) return;
+  const kids = [...bubble.children].filter((n) => n.matches('p, blockquote, pre, .embed'));
+  const input = el('input', { type: 'text', maxLength: 500, value: msg.pt.t, className: 'dm-edit-in' });
+  input.setAttribute('aria-label', '쪽지 고치기');
+  const save = el('button', { type: 'submit', className: 'btn sm primary', textContent: '저장' }), cancel = el('button', { type: 'button', className: 'btn sm', textContent: '취소' });
+  const form = el('form', { className: 'dm-edit' }, input, save, cancel);
+  const done = () => { form.remove(); kids.forEach((k) => (k.hidden = false)); bubble.focus(); };
+  cancel.onclick = done;
+  input.onkeydown = (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    if (text === msg.pt.t) return done();
+    if (dmLocked()) return handlers['dm-error']({ msg: '쪽지 보안 키가 잠겨 있어요. 쪽지 목록에서 비밀번호로 열어 주세요.' });
+    save.disabled = true;
+    let enc;
+    try { enc = await dmEncrypt(msg.to, { t: text, m: undefined }); } catch { save.disabled = false; return handlers['dm-error']({ msg: '쪽지를 암호화하지 못했어요. 새로고침한 뒤 다시 해 주세요.' }); }
+    if (!send({ t: 'dm-edit', with: msg.to, id: msg.id, enc })) { save.disabled = false; handlers['dm-error']({ msg: '연결이 끊겨서 고치지 못했어요. 다시 연결되면 해 주세요.' }); }
+  };
+  kids.forEach((k) => (k.hidden = true));
+  bubble.querySelector('header').after(form); input.focus(); input.select();
 }
 function dmScroll() { const c = $('#dmMsgs'); c.scrollTop = c.scrollHeight; }
 // 대화 전체를 그린다: 날짜가 바뀌는 곳에 구분선, 내 마지막 쪽지 아래에 읽음 표시
@@ -301,7 +328,7 @@ Object.assign(handlers, {
     await dmReveal(msg);
     if (mine) dmPend = null;
     const p = dmPeers.get(peerUid) || { uid: peerUid, unread: 0 };
-    Object.assign(p, { name: m.peer.name, color: m.peer.color, last: { text: lastText(msg), ts: msg.ts, mine } });
+    Object.assign(p, { name: m.peer.name, color: m.peer.color, av: m.peer.av, last: { text: lastText(msg), ts: msg.ts, mine } });
     dmPeers.set(peerUid, p);
     const arr = dmThreads.get(peerUid), prev = arr?.at(-1); arr?.push(msg);
     const viewing = activeTab === 'dm' && dmOpenUid === peerUid && !$('#dmThread').hidden && !document.hidden;
@@ -320,7 +347,7 @@ Object.assign(handlers, {
     dmThreads.set(m.with, m.msgs);
     const p = dmPeers.get(m.with);
     if (p) {
-      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color, online: m.peer.online, prev: m.peer.prev || '', deleted: m.peer.deleted });
+      if (m.peer?.name) Object.assign(p, { name: m.peer.name, color: m.peer.color, av: m.peer.av, online: m.peer.online, prev: m.peer.prev || '', deleted: m.peer.deleted });
       const last = m.msgs.at(-1);
       if (last) p.last = { text: lastText(last), ts: last.ts, mine: last.from === meUid }; else delete p.last; // 지운 뒤에는 목록 미리보기도 맞춘다
     }
@@ -337,6 +364,14 @@ Object.assign(handlers, {
     const arr = dmThreads.get(m.by); if (arr) for (const x of arr) if (x.from === meUid) x.read = true;
     if (dmOpenUid === m.by) dmReceipt();
   },
+  'dm-edited': dmSerial(async (m) => { // 쪽지가 고쳐졌다 (내가 고쳤든 상대가 고쳤든): 말풍선과 목록 미리보기를 새 내용으로
+    const arr = dmThreads.get(m.with), msg = arr?.find((x) => x.id === m.id);
+    if (!msg) { send({ t: 'dm-history', with: m.with }); return; } // 아직 불러오지 않은 대화: 기록을 다시 받는다
+    Object.assign(msg, { enc: m.enc, edited: m.edited }); await dmReveal(msg);
+    const p = dmPeers.get(m.with);
+    if (p?.last && arr.at(-1) === msg) { p.last.text = lastText(msg); dmRender(); }
+    if (dmOpenUid === m.with) { const old = $('#dmMsgs').querySelector(`[data-id="${m.id}"]`); if (old) old.replaceWith(dmBubble(msg)); }
+  }),
   'dm-deleted': dmSerial(async (m) => {
     const arr = dmThreads.get(m.with); if (arr) dmThreads.set(m.with, arr.filter((x) => x.id !== m.id));
     if (dmOpenUid === m.with) { $('#dmMsgs').querySelector(`[data-id="${m.id}"]`)?.remove(); dmReceipt(); }
@@ -348,6 +383,12 @@ Object.assign(handlers, {
     if (dmOpenUid === m.with) dmDrawThread([]);
     dmRender();
   }),
+  profile(m) { // 누군가 프로필 사진을 바꿨다: 쪽지 목록·대화창·상대 고르기의 그림을 새 번호로 다시 그린다
+    const p = dmPeers.get(m.uid); if (p) p.av = m.av;
+    const q = dmMembers.find((x) => x.uid === m.uid); if (q) q.av = m.av;
+    dmRender(); renderPicker();
+    if (dmOpenUid) $('#dmMsgs').querySelectorAll('.m:not(.mine) .av').forEach((n) => { const mp = dmPeers.get(dmOpenUid); if (mp && dmOpenUid === m.uid) paintAvatar(n, peerUser(mp)); });
+  },
   blocks(m) { dmBlocked = new Set(m.list); dmRender(); if (dmOpenUid) renderThreadHeader(); },
   members(m) { dmMembers = m.list; renderPicker(); },
   'dm-error'(m) {

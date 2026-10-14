@@ -2,7 +2,7 @@
 // 앱이 닫혀 있거나 화면을 안 보고 있을 때는 서버가 푸시 알림을 보낸다 (iPhone은 홈 화면에 설치한 앱에서만).
 // 위장: 알림의 이름·내용·아이콘(서버가 만든다)과 탭 제목·아이콘(여기서 바꾼다)을 평범한 것으로 바꾼다.
 // 구독마다 설정이 따로 서버에 저장되므로 폰은 위장, PC는 평소대로 처럼 기기별로 다르게 쓸 수 있다.
-let notifPrefs = { dm: true, ding: true, spoof: 'off', tab: true };
+let notifPrefs = { dm: true, ding: true, spoof: 'off', tab: true, open: false }; // open: 방이 열리면(빈 방에 첫 사람이 들어오면) 알림
 try { Object.assign(notifPrefs, JSON.parse(get('notifPrefs') || '{}')); } catch {}
 let spoofs = {}, vapidKey = '';
 const baseTitle = document.title, baseIconEl = document.querySelector('link[rel=icon]'), baseIcon = baseIconEl?.getAttribute('href');
@@ -11,22 +11,25 @@ const b64u = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')
 const savePrefs = () => set('notifPrefs', JSON.stringify(notifPrefs));
 
 // ---- 탭 제목·아이콘 ----
-function setIdentity(title, icon) { document.title = title; baseIconEl?.setAttribute('href', icon); }
+function setIdentity(title, icon) { document.title = title; baseIconEl?.setAttribute('type', /^data:image\/svg/.test(icon) ? 'image/svg+xml' : 'image/png'); baseIconEl?.setAttribute('href', icon); }
+// 우선순위: 알림 위장의 탭 제목·아이콘 > 앱 로고 위장(logo.js) > 원래 모습
 function applyTabIdentity() {
-  const sp = spoofs[notifPrefs.spoof];
-  if (notifPrefs.tab && sp?.tab) setIdentity(sp.tab, sp.icon); else setIdentity(baseTitle, baseIcon);
+  const sp = spoofs[notifPrefs.spoof], d = logoNow();
+  if (notifPrefs.tab && sp?.tab) setIdentity(sp.tab, sp.icon); else if (d) setIdentity(d.title, d.icon); else setIdentity(baseTitle, baseIcon);
+  paintLogo(d);
 }
-// 패닉 중에는 위장 설정이 없어도 평범한 탭으로 보이게 한다
+// 패닉 중에는 위장 설정이 없어도 평범한 탭으로 보이게 한다 (패닉이 막 시작되는 중이라 saverOn 은 아직 false 다)
 function panicIdentity(on) {
   if (!on) return applyTabIdentity();
-  const sp = spoofs[notifPrefs.spoof];
-  setIdentity(sp?.tab || '새 탭', sp?.tab ? sp.icon : baseIcon);
+  const sp = spoofs[notifPrefs.spoof], d = logoNow(true);
+  setIdentity(sp?.tab || d?.title || '새 탭', sp?.tab ? sp.icon : d?.icon || baseIcon);
+  paintLogo(d);
 }
 
 // ---- 푸시 구독 ----
 async function pushSend() { // 현재 설정으로 서버의 구독 정보를 갱신
   const sub = await (await navigator.serviceWorker.ready).pushManager.getSubscription();
-  if (sub) send({ t: 'push-sub', sub: sub.toJSON(), prefs: { dm: notifPrefs.dm, spoof: notifPrefs.spoof } });
+  if (sub) send({ t: 'push-sub', sub: sub.toJSON(), prefs: { dm: notifPrefs.dm, spoof: notifPrefs.spoof, open: notifPrefs.open } });
   return !!sub;
 }
 async function enablePush() {
@@ -40,7 +43,7 @@ async function enablePush() {
     await sub?.unsubscribe();
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u(vapidKey) });
   }
-  send({ t: 'push-sub', sub: sub.toJSON(), prefs: { dm: notifPrefs.dm, spoof: notifPrefs.spoof } });
+  send({ t: 'push-sub', sub: sub.toJSON(), prefs: { dm: notifPrefs.dm, spoof: notifPrefs.spoof, open: notifPrefs.open } });
   set('pushOn', '1');
   return '';
 }
@@ -53,6 +56,7 @@ async function disablePush() {
 // ---- 설정 창 ----
 function renderNotify(note) {
   $('#dmOn').checked = notifPrefs.dm;
+  $('#openOn').checked = !!notifPrefs.open;
   $('#dingOn').checked = notifPrefs.ding !== false;
   $('#tabSpoof').checked = notifPrefs.tab;
   $('#spoofSel').value = notifPrefs.spoof;
@@ -73,6 +77,7 @@ $('#pushOn').onchange = async (e) => {
     else { await disablePush(); renderNotify('알림을 껐어요.'); }
   } catch (err) { console.warn(err); renderNotify('알림을 켜지 못했어요. 잠시 뒤 다시 시도해 주세요.'); }
 };
+$('#openOn').onchange = (e) => { notifPrefs.open = e.target.checked; savePrefs(); pushSend().then((ok) => { if (!ok && notifPrefs.open) renderNotify('먼저 위의 "이 기기에서 알림 받기"를 켜 주세요. 그러면 방이 열릴 때 알림이 와요.'); }); };
 $('#dmOn').onchange = (e) => { notifPrefs.dm = e.target.checked; savePrefs(); pushSend(); };
 $('#dingOn').onchange = (e) => { notifPrefs.ding = e.target.checked; savePrefs(); };
 $('#tabSpoof').onchange = (e) => { notifPrefs.tab = e.target.checked; savePrefs(); applyTabIdentity(); renderNotify(); };

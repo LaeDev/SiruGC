@@ -89,7 +89,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(await B.js(`!document.querySelector('#dmMsgs .m:not(.mine) .mact')`), '남이 보낸 쪽지에는 삭제 메뉴가 없음');
     await A.js(`document.querySelectorAll('#dmMsgs .m.mine .bubble')[1].querySelector('p').click()`); await wait(200);
     check(await A.js(`!document.querySelectorAll('#dmMsgs .m.mine .mact')[1].hidden`), '내 쪽지를 누르면 삭제 버튼이 나타남');
-    await A.js(`document.querySelectorAll('#dmMsgs .m.mine .mact button')[1].click()`);
+    await A.js(`[...document.querySelectorAll('#dmMsgs .m.mine .mact button')].filter((b) => b.textContent === '이 쪽지 삭제')[1].click()`);
     check(await until(A, `document.querySelectorAll('#dmMsgs .bubble').length === 1`), '삭제하면 내 화면에서 사라짐');
     check(await until(B, `document.querySelectorAll('#dmMsgs .bubble').length === 1`), '상대 화면에서도 사라짐');
     check(await until(B, `document.querySelector('#dmMsgs .bubble p').textContent === '첫 번째'`), '남은 쪽지는 그대로');

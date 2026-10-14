@@ -21,7 +21,7 @@ const UA = {
 
 (async () => {
   const state = path.join(os.tmpdir(), `dmonly-${Date.now()}.json`);
-  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env') }, stdio: 'ignore' });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: state, CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', HOST_AWAY_MS: '500' }, stdio: 'ignore' });
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${prof}`, '--no-first-run', '--mute-audio', 'about:blank'], { stdio: 'ignore' });
   let failed = 0;

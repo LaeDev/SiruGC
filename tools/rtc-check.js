@@ -31,7 +31,8 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     const raw = (method, params = {}, sessionId) => new Promise((ok) => { const i = ++id; pending.set(i, ok); browser.send(JSON.stringify({ id: i, method, params, sessionId })); });
 
     async function page(name) {
-      const { result: { targetId } } = await raw('Target.createTarget', { url: 'about:blank' });
+      const { result: { browserContextId } } = await raw('Target.createBrowserContext'); // 창마다 따로 저장소를 가져야 서로 다른 기기다 (같은 기기는 한 자리만 쓴다)
+      const { result: { targetId } } = await raw('Target.createTarget', { url: 'about:blank', browserContextId });
       const { result: { sessionId } } = await raw('Target.attachToTarget', { targetId, flatten: true });
       const call = (m, p) => raw(m, p, sessionId);
       await call('Page.enable'); await call('Runtime.enable');

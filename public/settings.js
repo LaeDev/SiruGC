@@ -137,14 +137,15 @@ syncThemeColor();
 // ---- 분류 (화면 / 음성 / 알림 / 숨기기 / 계정 / 앱 설치·정보) ----
 // 데스크톱은 왼쪽 목록 + 오른쪽 내용. 폰은 목록 화면에서 하나를 누르면 그 내용으로 들어가고 ← 로 돌아온다.
 // 방에 들어오기 전(첫 화면)에는 화면과 앱 설치·정보(로그인했다면 계정도)만 쓸 수 있다. 숨겨진 페이지(예: 게스트의 알림)는 목록에서도 빠진다.
-const SET_CATS = [['look', '화면', 'pgLook'], ['voice', '음성', 'pgVoice'], ['notif', '알림', 'notifSec'], ['hide', '숨기기', 'pgHide'], ['acct', '계정', 'pgAcct'], ['app', '앱 설치·정보', 'pgApp']];
-const SET_PRE = ['look', 'app'];
+const SET_CATS = [['look', '화면', 'pgLook'], ['profile', '프로필', 'pgProfile'], ['voice', '음성', 'pgVoice'], ['notif', '알림', 'notifSec'], ['hide', '숨기기', 'pgHide'], ['acct', '계정', 'pgAcct'], ['app', '앱 설치·정보', 'pgApp']];
+const SET_PRE = ['look', 'app']; // (프로필은 방에 들어온 뒤에만: 입장 전에는 입장 화면에서 꾸민다)
 let setCur = get('setPage') || 'look';
 const setPhone = () => matchMedia('(max-width:700px)').matches;
 const setAvail = (cat) => { const c = SET_CATS.find((x) => x[0] === cat); return !!c && !$('#' + c[2]).hidden && (joined || SET_PRE.includes(cat) || (cat === 'acct' && loggedIn())); }; // 입장 전에도 로그인한 사람은 계정(닉네임·비밀번호·삭제)을 만질 수 있어야 한다
 const setLabel = (cat) => SET_CATS.find((x) => x[0] === cat)?.[1] || '설정';
 const SET_SUM = {
   look: () => THEME_NAME[get('theme') || 'auto'] || '',
+  profile: () => users.find((u) => u.id === me)?.name || '',
   voice: () => (voicePrefs.ns ? '잡음 억제 켜짐' : '잡음 억제 꺼짐'),
   notif: () => ($('#pushOn').checked ? '켜짐' : '꺼짐'),
   hide: () => ($('#spoofSel').selectedOptions[0]?.textContent || '').split(' (')[0],
@@ -180,6 +181,9 @@ matchMedia('(max-width:700px)').addEventListener('change', () => { if (settingsD
 // ---- 창 열고 닫기 ----
 // <dialog>를 지원하지 않는 구형 브라우저(iOS 15.4 미만, 일부 앱 안 브라우저)에서도 열리고 닫히게 한다
 function openSettings() {
+  if (joined && !$('#profMake .make')) $('#profMake').append($('#makeWrap .make')); // 입장 화면의 프로필 꾸미기 도구를 설정의 프로필 페이지로 옮겨 쓴다 (같은 도구라서 입장 화면과 똑같이 동작)
+  profUi();
+  $('#leaveRow').hidden = !joined || !!dmOnly; // 방에서 나가기는 방에 들어온 뒤에만
   $('#helpRows').hidden = $('#helpHead').hidden = !joined; // 도움말 다시 보기는 방에 들어온 뒤에만 (화면의 버튼을 가리켜야 해서)
   $('#helpRoom').closest('.srow').hidden = !!dmOnly; $('#helpDm').closest('.srow').hidden = !meUid;
   buildSetNav();
@@ -195,3 +199,60 @@ $('#settingsBtn').onclick = $('#joinSettings').onclick = openSettings;
 $('#setClose').onclick = (e) => { e.preventDefault(); closeSettings(); }; // form method=dialog를 모르는 브라우저에서 페이지가 이동하지 않게
 settingsDlg.addEventListener('click', (e) => { if (e.target === settingsDlg) closeSettings(); });
 addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsDlg.classList.contains('fallback') && settingsDlg.hasAttribute('open')) closeSettings(); }); // 바깥을 누르면 닫힘
+
+/* ---------- 프로필 페이지: 방 안에서 아바타(사진·이모티콘·색)와 닉네임을 바꾼다 ---------- */
+function profUi() {
+  const acct = loggedIn();
+  $('#profGuestName').hidden = acct; $('#profAcctName').hidden = !acct;
+  $('#profAcctNm').textContent = acct ? get('acctName') : '';
+  $('#profWho').textContent = acct ? '로그인한 계정의 프로필이에요. 저장하면 내 모든 기기에 바로 바뀌어요.' : '게스트 프로필이에요. 방을 나가면 사라져요.';
+  refresh(); // 미리보기를 지금 프로필로
+}
+$('#profToAcct').onclick = () => setPage('acct');
+$('#profSave').onclick = () => {
+  if (!send({ t: 'profile', avatar: currentAvatar(), color: profile.color })) return setMsg('profMsg', '연결이 끊겨 있어요. 다시 연결되면 눌러 주세요.');
+  profileEdited = true; set('profile', JSON.stringify(profile));
+  setMsg('profMsg', '프로필을 저장했어요. 다른 사람 화면에도 바뀌어요.', true);
+};
+$('#gRenGo').onclick = () => {
+  const name = $('#gRenIn').value.replace(/\s+/g, ' ').trim();
+  if (!name) return setMsg('gRenMsg', '새 닉네임을 입력해 주세요.');
+  if (!NICK_RE.test(name) || !NICK_LETTER.test(name)) return setMsg('gRenMsg', NAME_HELP);
+  if (!send({ t: 'guest-rename', name })) setMsg('gRenMsg', '연결이 끊겨 있어요. 다시 연결되면 눌러 주세요.');
+};
+Object.assign(handlers, {
+  'rename-result'(m) {
+    if (!m.ok) return setMsg('gRenMsg', m.msg || '바꾸지 못했어요.');
+    joinName = m.name; set('name', m.name); $('#nameIn').value = m.name; $('#gRenIn').value = '';
+    setMsg('gRenMsg', `닉네임을 "${m.name}"으로 바꿨어요.`, true);
+  },
+  'guest-renamed'(m) { // 게스트가 닉네임을 바꿨다: 이미 올라온 말풍선의 이름도 바꾼다
+    document.querySelectorAll('#chat .m[data-sid]').forEach((row) => { if (row.dataset.sid === m.id) row.querySelector('.bubble header b').textContent = m.name; });
+  },
+});
+
+/* ---------- 약관·정보: 개인정보처리방침과 이용약관을 앱 안에서 읽는다 ---------- */
+const docDlg = $('#docDlg');
+async function openDoc(which, title) {
+  $('#docTitle').textContent = title;
+  $('#docBody').replaceChildren(el('p', { className: 'note', textContent: '불러오는 중…' }));
+  if (typeof docDlg.showModal === 'function') { if (!docDlg.open) docDlg.showModal(); } else { docDlg.setAttribute('open', ''); docDlg.classList.add('fallback'); }
+  try {
+    const r = await fetch('/docs/' + which, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(r.status);
+    $('#docBody').replaceChildren(...mdDoc(await r.text()));
+  } catch { $('#docBody').replaceChildren(el('p', { className: 'note', textContent: '문서를 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.' })); }
+  $('#docBody').scrollTop = 0; $('#docBody').focus();
+}
+$('#docPrivacy').onclick = () => openDoc('privacy', '개인정보처리방침');
+$('#docTerms').onclick = () => openDoc('terms', '이용약관');
+$('#docClose').onclick = (e) => { e.preventDefault(); if (typeof docDlg.close === 'function') docDlg.close(); else docDlg.removeAttribute('open'); };
+docDlg.addEventListener('click', (e) => { if (e.target === docDlg) $('#docClose').click(); });
+
+// 방 나가기: 직접 나가는 것이라 호스트도 바로 넘어간다 (manual). 나간 뒤 첫 화면으로
+$('#leaveBtn').onclick = () => {
+  if (!confirm('방에서 나갈까요?')) return;
+  ended = true; send({ t: 'bye', manual: true });
+  try { stopEverything(); } catch {}
+  location.reload();
+};

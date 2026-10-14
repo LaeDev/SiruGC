@@ -21,20 +21,47 @@ function renderStage() {
   $('#shareIcon').innerHTML = `<use href="#${localStream ? 'i-stop' : 'i-screen'}"/>`;
   btn.setAttribute('aria-label', localStream ? '화면 공유 중지' : '화면 공유 시작');
   setTone(btn, localStream ? 'stop' : 'blue');
-  btn.disabled = !!sharerId && sharerId !== me;
-  btn.title = btn.disabled ? '다른 사람이 공유하는 동안에는 시작할 수 없어요' : '';
+  const canShare = !!navigator.mediaDevices?.getDisplayMedia; // 폰·태블릿 브라우저는 화면 공유를 '하는' 기능이 없다 (보는 것은 된다)
+  btn.disabled = (!!sharerId && sharerId !== me) || (!canShare && !localStream);
+  btn.title = !canShare && !localStream ? '이 기기의 브라우저에서는 화면을 공유할 수 없어요. 다른 사람이 공유하는 화면은 볼 수 있어요' : btn.disabled ? '다른 사람이 공유하는 동안에는 시작할 수 없어요' : '';
   applySound();
 }
 $('#segYt').onclick = () => { stageView = 'yt'; renderStage(); };
 $('#segScreen').onclick = () => { stageView = 'screen'; renderStage(); };
 
 // 모든 소리(영상, 공유 화면)를 한곳에서 정한다. 화면에 안 보이는 쪽, 내 공유 미리보기(에코)는 항상 끈다.
+// 영상 소리 크기와 음소거는 내 기기에서만 적용되고 기억된다 (다른 사람 소리·음성 대화 크기와 별개). iOS 는 웹페이지가 소리 크기를 바꾸지 못해서 슬라이더 대신 안내만 보인다.
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+let ytVol = Math.max(0, Math.min(100, Number(get('ytVol') ?? 100) || 0)), ytMuted = get('ytMuted') === '1';
+// 폰(700px 이하)은 세로 공간이 아까워서 소리 조절을 영상 왼쪽 위에 겹쳐 두고, 넓은 화면은 영상 바로 아래 줄에 둔다
+const ytvMq = matchMedia('(max-width:700px)');
+function placeYtVol() {
+  const v = $('#ytVol');
+  if (ytvMq.matches) { if (v.parentElement !== $('#ytWrap')) $('#ytWrap').append(v); } else if (v.parentElement !== $('#stage')) $('#ytWrap').after(v);
+  v.classList.toggle('ovl', ytvMq.matches);
+}
+ytvMq.addEventListener('change', placeYtVol);
+function renderYtVol() {
+  placeYtVol();
+  $('#ytVol').hidden = $('#ytWrap').hidden;
+  $('#ytVolIn').value = ytVol; $('#ytVolOut').textContent = ytVol + '%';
+  $('#ytMute').setAttribute('aria-pressed', ytMuted);
+  $('#ytMuteLbl').textContent = ytMuted ? '영상 소리 켜기' : '영상 소리 끄기';
+  $('#ytMuteIcon').innerHTML = `<use href="#${ytMuted ? 'i-volume-x' : 'i-volume'}"/>`;
+  $('#ytMute').classList.toggle('stop', ytMuted);
+  $('.ytv-r').hidden = $('#ytVolOut').hidden = IOS; $('#ytVolNote').hidden = !IOS;
+}
+$('#ytVolIn').oninput = (e) => { ytVol = +e.target.value; if (ytVol > 0 && ytMuted) { ytMuted = false; set('ytMuted', '0'); } set('ytVol', String(ytVol)); renderYtVol(); applySound(); };
+$('#ytMute').onclick = () => { ytMuted = !ytMuted; set('ytMuted', ytMuted ? '1' : '0'); renderYtVol(); applySound(); };
 function applySound() {
   const ytHidden = $('#ytWrap').hidden;
-  if (playerReady) (soundOff || ytHidden ? player.mute() : player.unMute());
+  if (playerReady) {
+    if (soundOff || ytHidden || ytMuted) player.mute(); else { player.unMute(); if (!IOS) player.setVolume(ytVol); }
+  }
+  renderYtVol();
   screenEl.muted = soundOff || !!localStream;
   applyAllVoiceVolumes(); // 상대 목소리: 모든 소리 끄기 + 사람별 크기
-  document.querySelectorAll('.media video').forEach((v) => (v.muted = soundOff)); // 채팅에 올라온 동영상
+  document.querySelectorAll('.media video, .embed video:not([autoplay])').forEach((v) => (v.muted = soundOff)); // 채팅에 올라온 동영상, X 카드의 동영상 (움직이는 그림(GIF)은 원래 소리가 없다)
 }
 
 /* ================= 같이 보기 (유튜브) ================= */
@@ -275,9 +302,16 @@ function remoteShareEnded() {
 }
 
 async function startShare() {
+  if (!window.isSecureContext) return sys('화면 공유는 https 주소(또는 이 기기 안의 localhost)에서만 쓸 수 있어요. 지금 주소는 안전한 연결이 아니에요.');
+  if (!navigator.mediaDevices?.getDisplayMedia) return sys(deviceKind() === 'pc' ? '이 브라우저는 화면 공유를 지원하지 않아요. 최신 Chrome, Edge, Firefox를 써 주세요.' : '폰·태블릿 브라우저는 화면을 공유할 수 없어요. 다른 사람이 공유하는 화면은 볼 수 있어요.');
   try {
-    localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-  } catch { return sys('화면 공유를 시작하지 못했어요. https 주소에서 접속했는지 확인해 주세요.'); }
+    try { localStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }); }
+    catch (e) { if (e.name === 'TypeError' || e.name === 'OverconstrainedError') localStream = await navigator.mediaDevices.getDisplayMedia({ video: true }); else throw e; } // 소리 옵션을 못 받는 브라우저는 영상만
+  } catch (e) {
+    if (e.name === 'AbortError' || (e.name === 'NotAllowedError' && !/system/i.test(e.message || ''))) return; // 공유 창에서 취소했다: 말없이 돌아간다
+    if (e.name === 'NotAllowedError') return sys('운영체제가 브라우저의 화면 녹화를 막고 있어요. 운영체제의 개인정보·화면 녹화 설정에서 허용해 주세요.');
+    return sys('화면 공유를 시작하지 못했어요 (' + (e.name || '알 수 없는 오류') + '). 다른 창이나 화면을 골라 다시 해 보세요.');
+  }
   localStream.getVideoTracks()[0].onended = stopShare;
   screenEl.srcObject = localStream;
   stageView = 'screen';
