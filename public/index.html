@@ -193,6 +193,12 @@
     </div>
 
     <div class="frame" id="ytWrap" hidden><div id="ytplayer"></div></div>
+    <div class="ytvol" id="ytVol" role="group" aria-label="영상 소리" hidden>
+      <button class="btn sm" id="ytMute" type="button" aria-pressed="false"><svg class="i" id="ytMuteIcon"><use href="#i-volume"/></svg><span id="ytMuteLbl">영상 소리 끄기</span></button>
+      <label class="ytv-r"><span class="sr">영상 소리 크기</span><input type="range" id="ytVolIn" min="0" max="100" step="5" value="100"></label>
+      <output id="ytVolOut" for="ytVolIn">100%</output>
+      <small class="ytv-note" id="ytVolNote" hidden>이 기기에서는 영상 소리 크기를 기기의 음량 버튼으로 조절해요.</small>
+    </div>
     <div class="frame" id="screenWrap" hidden>
       <video id="screen" autoplay playsinline controls></video>
       <span class="badge" id="screenBadge"></span>
@@ -242,6 +248,7 @@
 
     <section class="panel" id="p-users" role="tabpanel" aria-labelledby="tab-users" hidden>
       <div class="scroll">
+        <div class="share-room host-only"><button class="btn sm" id="shareKakao" type="button"><svg class="i"><use href="#i-link"/></svg>카카오톡으로 알리기</button><small>방이 열렸다는 글을 카카오톡 오픈채팅방 등에 공유해요. 공유 창에서 보낼 곳을 고르면 돼요.</small></div>
         <ul class="users" id="users"></ul>
         <details class="bans" id="banBox" hidden><summary>차단 목록</summary><ul id="bans"></ul></details>
       </div>
@@ -403,6 +410,13 @@
   </form>
 </dialog>
 
+<dialog id="docDlg" class="dlg doc-dlg" aria-labelledby="docTitle">
+  <form method="dialog" class="dlg-in">
+    <header class="dlg-h"><h2 id="docTitle"></h2><button class="btn icon" id="docClose" type="button" aria-label="닫기"><svg class="i"><use href="#i-x"/></svg></button></header>
+    <div class="dlg-b doc-b" id="docBody" tabindex="0"></div>
+  </form>
+</dialog>
+
 <dialog id="settings" class="dlg" aria-labelledby="setTitle" data-view="list">
   <form method="dialog" class="dlg-in">
     <header class="dlg-h">
@@ -440,7 +454,25 @@
               <div class="m mine"><span class="av" style="--c:#6ee7b7">나</span><div class="bubble" style="--c:#6ee7b7"><header><b>나</b><time>오후 3:13</time></header><p>좋아! 대기열에 올려 둘게</p></div></div>
             </div></div>
             <div class="srow"><span class="st"><b>화면 크기</b><small>영상과 채팅 사이의 선(폰은 손잡이)을 끌어서 바꿔요.</small></span><button type="button" class="btn" id="layoutReset">되돌리기</button></div>
+            <label class="srow"><span class="st"><b>채팅의 링크 카드</b><small>X(트위터) 글은 그 자리에서 보여 주고, 인스타그램은 눌러서 보게 해요.</small></span><input type="checkbox" class="swt" id="embChat"></label>
+            <label class="srow"><span class="st"><b>쪽지의 링크 카드</b><small>켜면 쪽지에 든 X 링크 주소가 서버에 전달돼요. 쪽지 내용은 전달되지 않아요.</small></span><input type="checkbox" class="swt" id="embDm"></label>
           </div>
+        </section>
+
+        <!-- 프로필 -->
+        <section class="set-page" id="pgProfile" aria-labelledby="hProfile">
+          <h3 id="hProfile">프로필</h3>
+          <div class="prof-top"><span class="av xl" id="setPreview" role="img" aria-label="내 아바타 미리보기"></span><p class="note" id="profWho"></p></div>
+          <h4 class="gt">닉네임</h4>
+          <div class="sgroup">
+            <div class="srow stack" id="profGuestName"><div class="row"><label class="field"><span>닉네임 바꾸기</span><input type="text" id="gRenIn" maxlength="20" autocomplete="off"></label><button type="button" class="btn" id="gRenGo">바꾸기</button></div></div>
+            <div class="srow" id="profAcctName"><span class="st"><b id="profAcctNm"></b><small>계정 닉네임은 7일에 한 번 바꿀 수 있어요.</small></span><button type="button" class="btn" id="profToAcct">계정에서 바꾸기</button></div>
+          </div>
+          <p class="note" id="gRenMsg" role="status"></p>
+          <h4 class="gt">사진·이모티콘·색</h4>
+          <div id="profMake"></div>
+          <div class="sgroup"><div class="srow"><span class="st"><b>프로필 저장</b><small>바꾸면 다른 사람 화면에도 바로 바뀌어요. 아바타는 횟수 제한이 없어요.</small></span><button class="btn primary" id="profSave" type="button">저장하기</button></div></div>
+          <p class="note" id="profMsg" role="status"></p>
         </section>
 
         <!-- 음성 -->
@@ -470,6 +502,7 @@
           <div class="sgroup">
             <label class="srow"><span class="st"><b>이 기기에서 알림 받기</b><small>앱이 닫혀 있어도 쪽지가 오면 알려 줘요.</small></span><input type="checkbox" class="swt" id="pushOn"></label>
             <label class="srow"><span class="st"><b>쪽지가 오면 알림</b></span><input type="checkbox" class="swt" id="dmOn"></label>
+            <label class="srow"><span class="st"><b>방이 열리면 알림</b><small>아무도 없던 방에 첫 사람이 들어오면 알려 줘요. 같은 알림은 5분에 한 번만 와요.</small></span><input type="checkbox" class="swt" id="openOn"></label>
             <label class="srow"><span class="st"><b>앱 안에서 소리</b><small>쪽지가 오면 짧은 소리를 내요.</small></span><input type="checkbox" class="swt" id="dingOn"></label>
             <div class="srow"><span class="st"><b>알림 확인</b></span><button type="button" class="btn" id="pushTest">테스트 알림 보내기</button></div>
           </div>
@@ -500,6 +533,16 @@
             <label class="srow"><span class="st"><b>탭 제목과 아이콘도 바꾸기</b></span><input type="checkbox" class="swt" id="tabSpoof"></label>
             <div class="srow stack"><div class="spoof-prev" id="spoofPrev" aria-live="polite"></div></div>
           </div>
+          <h4 class="gt">앱 로고 위장</h4>
+          <p class="note">헤더의 로고와 탭의 아이콘·제목을 평범한 모양으로 바꿔요. 이 기기에서만 바뀌어요. 홈 화면에 설치한 앱의 아이콘은 바뀌지 않아요.</p>
+          <div class="sgroup">
+            <label class="srow"><span class="st"><b>모양</b></span><select id="logoSel"></select></label>
+            <label class="srow" id="logoTitleRow"><span class="st"><b>탭 제목</b><small>비우면 모양의 기본 이름을 써요.</small></span><input type="text" id="logoTitle" maxlength="30" autocomplete="off"></label>
+            <div class="srow" id="logoImgRow"><span class="st"><b>내 이미지</b><small>가운데를 정사각형으로 잘라 작게 줄여서 이 기기에만 저장해요.</small></span><span class="srow-btns"><button type="button" class="btn" id="logoPick">이미지 고르기</button></span><input type="file" id="logoFile" accept="image/*" hidden></div>
+            <label class="srow" id="logoPanicRow"><span class="st"><b>패닉을 누른 동안만 바꾸기</b><small>끄면 이 기기에서는 늘 이 모양이에요.</small></span><input type="checkbox" class="swt" id="logoPanicOnly"></label>
+            <div class="srow stack"><div class="spoof-prev" id="logoPrev" aria-live="polite"></div></div>
+          </div>
+          <p class="note" id="logoMsg" role="status"></p>
           <details class="sub adv">
             <summary>고급: 강의 영상 바꾸기</summary>
             <label class="field"><span>유튜브 링크 (비우면 기본 강의)</span><input type="text" id="panicVideoIn" autocomplete="off" placeholder="https://www.youtube.com/watch?v=…"></label>
@@ -605,8 +648,16 @@
             <div class="srow"><span class="st"><b>그룹방 도움말</b><small>방 쓰는 법을 다시 봐요.</small></span><button type="button" class="btn" id="helpRoom">다시 보기</button></div>
             <div class="srow"><span class="st"><b>쪽지 도움말</b><small>암호화와 안전번호 확인 방법을 다시 봐요.</small></span><button type="button" class="btn" id="helpDm">다시 보기</button></div>
           </div>
+          <h4 class="gt">약관·정보</h4>
+          <div class="sgroup">
+            <div class="srow"><span class="st"><b>개인정보처리방침</b><small>어떤 정보를 얼마나 보관하는지 읽어요.</small></span><button type="button" class="btn" id="docPrivacy">읽기</button></div>
+            <div class="srow"><span class="st"><b>이용약관</b><small>이 서비스를 쓰는 규칙이에요.</small></span><button type="button" class="btn" id="docTerms">읽기</button></div>
+            <div class="srow"><span class="st"><b>이모티콘 그림</b><small>Twemoji © Twitter, Inc 및 기여자 (jdecked 포크). CC-BY 4.0 라이선스로 써요.</small></span><a class="btn" href="https://github.com/jdecked/twemoji" target="_blank" rel="noopener noreferrer">출처 보기</a></div>
+            <div class="srow"><span class="st"><b>소스코드</b><small>이 서비스의 코드를 GitHub에서 볼 수 있어요.</small></span><a class="btn" id="srcLink" href="https://github.com/LaeDev/SiruGC" target="_blank" rel="noopener noreferrer">GitHub 열기</a></div>
+          </div>
           <h4 class="gt">이 방</h4>
           <div class="sgroup">
+            <div class="srow" id="leaveRow"><span class="st"><b>방 나가기</b><small>호스트라면 바로 다음 사람에게 넘어가요. (탭을 그냥 닫으면 호스트는 3분 동안 자리를 지켜요)</small></span><button type="button" class="btn danger" id="leaveBtn">나가기</button></div>
             <div class="srow"><span class="st"><b>방 링크</b></span><button type="button" class="btn" id="copy"><svg class="i"><use href="#i-link"/></svg>복사</button></div>
           </div>
           <p class="note" id="verNote"></p>
@@ -617,6 +668,8 @@
   </form>
 </dialog>
 
+<script src="/emoji.js"></script>
+<script src="/rich.js"></script>
 <script src="/app.js"></script>
 <script src="/e2ee.js"></script>
 <script src="/auth.js"></script>
@@ -627,8 +680,10 @@
 <script src="/pwa.js"></script>
 <script src="/dm.js"></script>
 <script src="/notify.js"></script>
+<script src="/logo.js"></script>
 <script src="/panic.js"></script>
 <script src="/attach.js"></script>
 <script src="/tour.js"></script>
+<script src="/embed.js"></script>
 </body>
 </html>

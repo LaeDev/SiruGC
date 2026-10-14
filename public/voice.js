@@ -14,7 +14,7 @@ const dropLevel = (id) => { try { levels.get(id)?.src.disconnect(); } catch {} l
 let voicePrefs = { mic: 100, ns: true, nsAmt: 100, dr: 0, ec: true, agc: true, monitor: false };
 try { Object.assign(voicePrefs, JSON.parse(get('voicePrefs') || '{}')); } catch {}
 delete voicePrefs.filter; // (옛 버전의 목소리 필터 설정은 버린다)
-let voiceVol = {}; // 사람별 목소리 크기 (공개 번호 uid → 0~2). 브라우저에 저장해서 다음에도 유지
+let voiceVol = {}; // 사람별 목소리 크기 (계정은 공개 번호 uid, 게스트는 'g:닉네임' → 0~2). 브라우저에 저장해서 다음에도 유지
 try { voiceVol = JSON.parse(get('voiceVol') || '{}'); } catch {}
 const saveVoicePrefs = () => set('voicePrefs', JSON.stringify(voicePrefs));
 
@@ -143,7 +143,8 @@ function setMicMuted(muted) { // 패닉 버튼도 이 함수를 쓴다
 }
 
 /* ---------- 상대 소리 크기 ---------- */
-const volOf = (id) => voiceVol[users.find((u) => u.id === id)?.uid] ?? 1;
+const volKey = (u) => u.uid || 'g:' + u.name;
+const volOf = (id) => { const u = users.find((x) => x.id === id); return (u && voiceVol[volKey(u)]) ?? 1; };
 function applyVoiceVolume(id) {
   const v = vpcs.get(id); if (!v) return;
   const vol = soundOff ? 0 : volOf(id);
@@ -151,15 +152,15 @@ function applyVoiceVolume(id) {
   else { v.audio.muted = vol === 0; v.audio.volume = Math.min(1, vol); } // WebAudio가 멈춰 있거나 없을 때: 100%를 넘는 키우기는 안 되지만 소리는 난다
 }
 function applyAllVoiceVolumes() { for (const id of vpcs.keys()) applyVoiceVolume(id); }
-function setVoiceVolume(uid, pct) {
-  voiceVol[uid] = pct / 100; set('voiceVol', JSON.stringify(voiceVol)); applyAllVoiceVolumes();
+function setVoiceVolume(key, pct) {
+  voiceVol[key] = pct / 100; set('voiceVol', JSON.stringify(voiceVol)); applyAllVoiceVolumes();
 }
 function volumeControl(u) { // 참가자를 눌렀을 때 나오는 메뉴에 들어간다
-  const pct = Math.round((voiceVol[u.uid] ?? 1) * 100);
+  const pct = Math.round((voiceVol[volKey(u)] ?? 1) * 100);
   const out = el('output', { textContent: pct + '%' });
   const input = el('input', { type: 'range', className: 'vol', min: 0, max: 200, step: 5, value: pct });
   input.setAttribute('aria-label', `${u.name} 목소리 크기`);
-  input.oninput = () => { out.textContent = input.value + '%'; setVoiceVolume(u.uid, +input.value); };
+  input.oninput = () => { out.textContent = input.value + '%'; setVoiceVolume(volKey(u), +input.value); };
   return el('label', { className: 'volrow' }, el('span', { textContent: '목소리 크기' }), input, out);
 }
 
@@ -249,14 +250,43 @@ function watchLevel(id, stream) {
   src.connect(an); // 스피커로는 연결하지 않음 (소리는 위의 gain 경로가 낸다)
   levels.set(id, { an, buf: new Uint8Array(an.frequencyBinCount), src });
 }
+// 디스코드처럼 조금이라도 소리가 들리면 바로 켠다: 작게 말해도 보이도록 기준을 낮추고(128 중 5), 0.05초마다 본다
+const SPEAK_PEAK = 5, SPEAK_HOLD = 400;
 setInterval(() => {
-  for (const [id, { an, buf }] of levels) {
-    an.getByteTimeDomainData(buf);
-    let peak = 0; for (const x of buf) peak = Math.max(peak, Math.abs(x - 128));
-    const speaking = peak > 14 && !(id === me && micMuted);
-    document.querySelectorAll(`.av[data-id="${id}"]`).forEach((n) => n.classList.toggle('speaking', speaking));
+  const now = Date.now();
+  for (const [id, L] of levels) {
+    L.an.getByteTimeDomainData(L.buf);
+    let peak = 0; for (const x of L.buf) peak = Math.max(peak, Math.abs(x - 128));
+    if (peak > SPEAK_PEAK && !(id === me && micMuted)) L.until = now + SPEAK_HOLD;
+    const speaking = (L.until || 0) > now;
+    document.querySelectorAll(`.av[data-id="${id}"]`).forEach((n) => n.classList.toggle('speaking', speaking)); // 목록이 다시 그려져도 바로 맞춰진다
   }
-}, 150);
+}, 50);
+
+// 칩을 누르면 뜨는 작은 창: 그 사람 목소리 크기 (내 칩이면 내 마이크 입력 크기)
+let vpopFor = null;
+function closeVpop() { $('#vpop')?.remove(); vpopFor = null; }
+function openVpop(chip, u) {
+  closeVpop(); vpopFor = u.id;
+  const body = u.id === me ? micGainControl() : volumeControl(u);
+  const pop = el('div', { id: 'vpop', className: 'vpop', role: 'dialog' }, el('b', { textContent: u.id === me ? '내 마이크' : u.name }), body);
+  pop.setAttribute('aria-label', u.id === me ? '내 마이크 입력 크기' : `${u.name} 목소리 크기`);
+  document.body.append(pop);
+  const r = chip.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + 'px';
+  pop.style.top = (r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(innerHeight - h - 8, r.bottom + 8)) + 'px';
+  pop.querySelector('input')?.focus({ preventScroll: true });
+}
+function micGainControl() {
+  const out = el('output', { textContent: voicePrefs.mic + '%' });
+  const input = el('input', { type: 'range', className: 'vol', min: 0, max: 200, step: 5, value: voicePrefs.mic });
+  input.setAttribute('aria-label', '내 마이크 입력 크기');
+  input.oninput = () => { voicePrefs.mic = +input.value; out.textContent = voicePrefs.mic + '%'; saveVoicePrefs(); if (mg) mg.inGain.gain.value = voicePrefs.mic / 100; $('#micGain').value = voicePrefs.mic; $('#micGainOut').textContent = voicePrefs.mic + '%'; };
+  return el('label', { className: 'volrow' }, el('span', { textContent: '입력 크기' }), input, out);
+}
+document.addEventListener('pointerdown', (e) => { if (vpopFor && !e.target.closest('#vpop, .vp.clk')) closeVpop(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && vpopFor) { const id = vpopFor; closeVpop(); document.querySelector(`.vp .av[data-id="${id}"]`)?.closest('.vp')?.focus(); } });
+addEventListener('resize', closeVpop);
 
 // ---- 영상/공유 화면 아래 음성 참가자 바: 누가 음성에 있고 누가 말하는지 (말하는 사람은 아바타 테두리가 커진다) ----
 function renderVoiceBar() {
@@ -266,7 +296,10 @@ function renderVoiceBar() {
   bar.replaceChildren(...inV.map(({ v, u }) => {
     const chip = el('div', { className: 'vp', role: 'listitem' }, avEl(u), el('span', { className: 'nm', textContent: u.id === me ? '나' : u.name }));
     chip.setAttribute('aria-label', `${u.id === me ? '나' : u.name}${v.muted ? ', 마이크 꺼짐' : ''}`);
-    chip.title = u.name;
+    chip.title = `${u.name} (눌러서 ${u.id === me ? '마이크 입력 크기' : '목소리 크기'} 조절)`;
+    chip.classList.add('clk'); chip.tabIndex = 0; chip.setAttribute('aria-haspopup', 'dialog');
+    chip.onclick = () => (vpopFor === u.id ? closeVpop() : openVpop(chip, u));
+    chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); chip.onclick(); } };
     if (v.muted) { const m = icon('i-mic-off'); m.setAttribute('class', 'i vi'); chip.append(m); }
     return chip;
   }));

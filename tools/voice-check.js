@@ -85,7 +85,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     check(p200 > p50 * 1.5, `실제 소리도 커짐 (50%일 때 ${p50.toFixed(1)} → 200%일 때 ${p200.toFixed(1)})`);
     await setVol(0); check((await gainOf()) === 0, '0% → 그 사람만 완전히 꺼짐');
     check((await peak(B, 2000)) < 1.5, '0%일 때 실제로 조용함');
-    check(await B.js(`JSON.parse(localStorage.voiceVol)['${auid}'] === 0`), '사람별 크기가 이 기기에 저장됨 (그 사람의 공개 번호 기준)');
+    check(await B.js(`JSON.parse(localStorage.voiceVol)['${auid || 'g:에이'}'] === 0`), '사람별 크기가 이 기기에 저장됨 (계정은 공개 번호, 게스트는 닉네임 기준)');
     await setVol(70);
     const keep = await B.js(`(() => { const before = document.querySelector('.acts input.vol'); renderUsers(); return before === document.querySelector('.acts input.vol') && usersPending; })()`);
     check(keep, '슬라이더를 끄는 중에는 목록이 다시 그려지지 않음 (끌고 있는 슬라이더를 놓치지 않음)');

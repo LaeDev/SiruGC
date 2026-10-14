@@ -8,6 +8,8 @@ const webpush = require('web-push');
 const createMessages = require('./messages');
 const createUploads = require('./uploads');
 const createAccounts = require('./accounts');
+const createChatLog = require('./chatlog');
+const createUnfurl = require('./unfurl');
 
 // config.env (선택): 한 줄에 KEY=VALUE, #으로 시작하면 주석. 이미 설정된 환경변수가 우선한다.
 // 쉘 이스케이프 문제(특히 윈도우 배치파일에서 JSON)를 피하려고 스크립트가 아니라 서버가 직접 읽는다.
@@ -43,7 +45,7 @@ const PUB = process.env.PUBLIC_DIR ? path.resolve(process.env.PUBLIC_DIR) : path
 // 실제로 화면 파일의 내용이 바뀌었을 때만 바뀐다. 파일마다 (수정 시각, 크기)가 그대로면 다시 읽지 않는다.
 let buildAt = 0, buildVal = '';
 const buildSig = new Map(); // 파일 → { sig, hash }
-const walkPub = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, n.name); if (n.isDirectory()) walkPub(p, out); else out.push(p); } return out; };
+const walkPub = (dir, out = []) => { for (const n of fs.readdirSync(dir, { withFileTypes: true })) { const p = path.join(dir, n.name); if (n.isDirectory()) { if (n.name !== 'emoji') walkPub(p, out); } else out.push(p); } return out; };
 const buildNow = () => {
   if (Date.now() - buildAt < 3000 && buildVal) return buildVal;
   const h = crypto.createHash('sha1');
@@ -123,12 +125,15 @@ const server = http.createServer((req, res) => {
   if (uploads.handle(req, res)) return; // POST /upload, GET /f/<파일>
   // 서버가 살아 있는지 확인하는 주소. 꺼졌다가 돌아왔는지 클라이언트가 이걸로 본다.
   if (req.url.startsWith('/auth/')) return handleAuth(req, res);
+  if (req.url.startsWith('/unfurl?')) return process.env.UNFURL === '0' ? res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"kind":"none"}') : unfurl.handle(req, res, clientIp(req));
   if (req.url === '/build') return res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ build: buildNow() })); // 열어 둔 화면이 새 버전인지 물어보는 주소
   if (req.url === '/healthz') return res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end('ok');
-  const av = req.url.match(/^\/a\/([0-9a-f]{12})$/); // 쪽지 목록에서 오프라인인 사람의 프사를 보여 주려고
+  const doc = req.url.match(/^\/docs\/(privacy|terms)$/); // 설정의 "약관·정보"에서 읽는 문서 (저장소의 PRIVACY.md, TERMS.md 그대로)
+  if (doc) return fs.readFile(path.join(__dirname, doc[1] === 'privacy' ? 'PRIVACY.md' : 'TERMS.md'), 'utf8', (err, txt) => err ? res.writeHead(404).end() : res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' }).end(txt));
+  const av = req.url.match(/^\/a\/([0-9a-f]{12})(\?v=\d+)?$/); // 쪽지 목록에서 오프라인인 사람의 프사를 보여 주려고. ?v= 는 프사가 바뀔 때 달라지는 번호라서 오래 기억해도 된다
   if (av) {
     const a = messages.avatarOf(av[1]);
-    return a ? res.writeHead(200, { 'Content-Type': a.type, 'Cache-Control': 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' }).end(a.data) : res.writeHead(404).end();
+    return a ? res.writeHead(200, { 'Content-Type': a.type, 'Cache-Control': av[2] ? 'private, max-age=86400, immutable' : 'private, max-age=60', 'X-Content-Type-Options': 'nosniff' }).end(a.data) : res.writeHead(404).end();
   }
   let rel;
   try { rel = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { return res.writeHead(400).end(); }
@@ -147,7 +152,7 @@ const server = http.createServer((req, res) => {
     if (path.basename(file) === 'sw.js') data = Buffer.from(data.toString('utf8').split('__BUILD__').join(buildNow())); // 파일이 바뀌면 서비스 워커 파일도 바뀌어서 브라우저가 새 것으로 갈아 끼운다
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-      'Cache-Control': 'no-cache', // 항상 재검증 (서비스 워커가 오프라인 대비를 맡음)
+      'Cache-Control': file.startsWith(path.join(PUB, 'emoji') + path.sep) ? 'public, max-age=2592000, immutable' : 'no-cache', // 항상 재검증 (서비스 워커가 오프라인 대비를 맡음). 이모티콘 그림은 바뀌지 않으니 오래 기억한다
       'X-Content-Type-Options': 'nosniff',
     }).end(data);
   });
@@ -178,6 +183,8 @@ const nameKey = (n) => String(n).normalize('NFKC').toLowerCase().replace(/[\s_.\
 const newId = (n = 4) => crypto.randomBytes(n).toString('hex');
 // 사진/동영상 업로드: 세션마다 발급한 토큰이 있어야 올릴 수 있다
 const uploads = createUploads({ findByToken: (t) => (t ? [...room.clients.values()].find((c) => c.uploadToken === t) : null), send });
+const chatlog = createChatLog(process.env.CHAT_FILE || DB.replace(/\.json$/i, '') + '-chat.json');
+const unfurl = createUnfurl(); // X 글 주소를 대신 가져와 링크 카드 내용으로 (UNFURL=0 이면 끔)
 const messages = createMessages({ room, send, newId, saveSoon, cleanMedia: uploads.validMedia });
 const sendAll = (msg) => room.clients.forEach((c) => send(c, msg)); // 쪽지만 쓰는 연결까지 포함해서 모두에게
 const nameInUse = (key) => [...room.clients.values()].some((c) => c.joined && nameKey(c.name) === key);
@@ -368,6 +375,21 @@ async function queueAdd(ws, videoId) {
   if (!room.yt || room.yt.ended) advance(); else broadcast(queueMsg()); // 기다리는 사이 다른 사람이 틀었을 수 있어 여기서 다시 판단
 }
 
+// 방이 열렸다: 빈 방에 첫 사람이 들어왔다. "방이 열리면 알려 주기"를 켠 기기에 푸시를 보내고, ROOM_OPEN_WEBHOOK(쉼표로 여러 개)으로 알린다.
+// 디스코드·슬랙·카카오 챗봇 연결 같은 곳에 이어 붙일 수 있게 JSON 한 줄만 보낸다 (누가 열었는지는 담지 않는다). 같은 방이 ROOM_OPEN_COOLDOWN_MS(기본 5분) 안에 또 열려도 한 번만 알린다.
+const OPEN_COOLDOWN_MS = Number(process.env.ROOM_OPEN_COOLDOWN_MS) || 5 * 60e3;
+let lastOpenAt = 0;
+function roomOpened(ws) {
+  const now = Date.now();
+  if (now - lastOpenAt < OPEN_COOLDOWN_MS) return;
+  lastOpenAt = now;
+  messages.pushOpen(ws.uid);
+  const url = process.env.ROOM_URL || 'https://' + AUTH_HOSTS[0], text = '시루 그룹챗 방이 열렸어요! 같이 들어와요. ' + url;
+  for (const hook of String(process.env.ROOM_OPEN_WEBHOOK || '').split(',').map((x) => x.trim()).filter((x) => /^https?:\/\//i.test(x))) {
+    fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ event: 'room-open', text, content: text, url, at: now }), signal: AbortSignal.timeout(5000) })
+      .then((r) => { if (!r.ok) console.warn('방 열림 웹훅이 오류를 돌려줬어요:', r.status); }).catch((e) => console.warn('방 열림 웹훅을 보내지 못했어요:', e.message));
+  }
+}
 const clearGhostTimers = (ws) => { clearTimeout(ws.ghostTimer); clearTimeout(ws.holdTimer); clearTimeout(ws.awayTimer); clearTimeout(ws.hostTimer); };
 
 // 호스트: 방에 맨 처음 들어온 사람. 나가거나(또는 연결이 HOST_AWAY_MS 넘게 끊기면) 가장 오래 있던 사람에게 넘어간다.
@@ -377,13 +399,14 @@ const hostVacant = () => { const h = room.hostId && room.clients.get(room.hostId
 function setHost(next) {
   const prev = room.hostId ? room.clients.get(room.hostId) : null;
   if (prev === next) return;
+  const who = next ? keyOf(next) : null, same = !!who && room.hostWho === who; // 같은 사람이 자기 자리를 되찾는 것(새로고침, 앱을 다시 열기)은 "호스트가 됐어요"를 또 띄우지 않는다
   if (prev) prev.host = false;
   room.hostId = next ? next.id : null;
-  if (next) next.host = true;
+  if (next) { next.host = true; room.hostWho = who; }
   if (prev) broadcast({ t: 'user-update', user: userOf(prev) });
   if (next) {
     if (room.clients.get(next.id) === next) broadcast({ t: 'user-update', user: userOf(next) });
-    broadcast({ t: 'host', id: next.id, name: next.name });
+    if (!same) broadcast({ t: 'host', id: next.id, name: next.name });
   }
   sendBans(); // 새 호스트가 밴 목록을 볼 수 있게
 }
@@ -399,20 +422,21 @@ function dropLive(ws) {
   if (room.sharer === ws.id) { room.sharer = null; broadcast({ t: 'share-stop' }); }
   if (room.voice.delete(ws.id)) broadcast(voiceMsg());
 }
-function leave(ws) {
+function leave(ws, quiet) { // quiet: 시간이 지나 자동으로 정리된 것이라 "나갔어요"를 띄우지 않는다
   if (room.clients.get(ws.id) !== ws) return; // 이미 다른 소켓이 이 세션을 이어받았으면 무시
   room.clients.delete(ws.id);
   clearGhostTimers(ws);
   if (room.sharer === ws.id) { room.sharer = null; broadcast({ t: 'share-stop' }); }
   if (room.voice.delete(ws.id)) broadcast(voiceMsg());
-  if (!ws.dmOnly) broadcast({ t: 'user-leave', id: ws.id });
+  if (!ws.dmOnly) broadcast({ t: 'user-leave', id: ws.id, quiet: quiet || undefined });
   if (room.hostId === ws.id) { room.hostId = null; ws.host = false; }
-  if (!roomCount()) { room.yt = null; room.queueGrants.clear(); room.hostId = null; } // 방에 아무도 없으면 영상 상태와 대기열 추가 권한을 처음으로
+  if (!roomCount()) { room.yt = null; room.queueGrants.clear(); room.hostId = null; room.hostWho = null; } // 방에 아무도 없으면 영상 상태와 대기열 추가 권한을 처음으로
   else ensureHost();
 }
 
 // 입장(또는 이어받기) 응답. 입장하는 사람 자신은 users에서 뺀다(클라이언트가 me를 더한다).
 function sendJoined(ws, extra = {}) {
+  const backlog = ws.dmOnly ? undefined : chatlog.since(ws.cid, ws.lastSeq); // 이 기기가 못 본 채팅
   send(ws, {
     t: 'joined', me: userOf(ws), resume: ws.resumeSecret, upload: ws.uploadToken,
     users: ws.dmOnly ? [] : [...room.clients.values()].filter((c) => c.id !== ws.id && !c.dmOnly).map(userOf),
@@ -420,12 +444,13 @@ function sendJoined(ws, extra = {}) {
     voice: ws.dmOnly ? [] : voiceMsg().list, ice: ws.dmOnly ? undefined : iceServers(), dmOnly: ws.dmOnly || undefined,
     kid: ws.uid ? curKey(ws.uid)?.kid : undefined, // 서버가 아는 내 현재 쪽지 키 (이 기기의 키와 다르면 다시 풀어야 한다)
     inbox: ws.uid ? messages.inboxFor(ws.uid) : [], blocks: ws.uid ? messages.blocksOf(ws.uid) : [], vapid: room.vapid.publicKey, spoofs: messages.SPOOFS,
-    bans: isStaff(ws) ? banList() : undefined, build: buildNow(), ...extra,
+    bans: isStaff(ws) ? banList() : undefined, build: buildNow(), backlog, ...extra,
   });
 }
 
 function join(ws, m, ip) {
   if (typeof m.cid !== 'string' || m.cid.length < 8 || m.cid.length > 64) return;
+  ws.lastSeq = Number.isInteger(m.lastSeq) ? m.lastSeq : 0; // 이 기기가 마지막으로 본 채팅 번호
   // 끊겼다가 돌아온 사람: 제한 시간 안에 같은 비밀 값을 가지고 오면 옛 세션을 그대로 이어받는다
   const old = m.resume && typeof m.resume.id === 'string' ? room.clients.get(m.resume.id) : null;
   if (old && old.cid === m.cid && typeof m.resume.secret === 'string' && m.resume.secret === old.resumeSecret) {
@@ -436,6 +461,7 @@ function join(ws, m, ip) {
     if (!old.ghost) old.terminate(); // 아직 살아 있다고 믿던 옛 소켓은 정리 (이 자리는 이미 넘어갔으니 나가기 처리는 건너뛴다)
     clearGhostTimers(old); old.ghost = false;
     if (old.away) broadcast({ t: 'user-away', id: ws.id, away: false }, ws);
+    if (!ws.dmOnly) chatlog.touch(ws.cid);
     return sendJoined(ws, { resumed: true });
   }
   // 닉네임은 방에 있는 사람(잠깐 끊긴 사람 포함)끼리 겹칠 수 없다. 같은 기기(cid)의 다시 들어오기만 겹쳐도 된다.
@@ -453,9 +479,17 @@ function join(ws, m, ip) {
   const key = nameKey(name);
   if (!acct && (!accounts.nameFree(key) || [...room.clients.values()].some((c) => c !== ws && c.joined && c.cid !== m.cid && nameKey(c.name) === key))) { send(ws, { t: 'name-taken', name }); return ws.close(); } // 계정이 쓰는(또는 막 바꾸며 비워 둔) 닉네임은 게스트가 못 쓴다
   // 이 기기가 끊겨서 방에 남아 있던 자리가 있으면(앱이 닫혔다가 알림을 눌러 다시 열린 경우) 같은 자리를 쓴다. 유령이 둘로 보이지 않게
-  const stale = [...room.clients.values()].find((c) => c.ghost && c.cid === m.cid);
-  if (stale) { dropLive(stale); clearGhostTimers(stale); room.clients.delete(stale.id); }
+  // 같은 기기가 여러 번 보이지 않게: 같은 cid의 옛 연결(끊겨서 남은 자리, 새로고침 전 페이지, 같은 브라우저의 다른 탭)은 모두 정리하고 한 자리만 쓴다.
+  // 아직 살아 있는 옛 연결(다른 탭)에는 '다른 곳에서 접속했어요'를 알리고 끊는다. 방에만 들어온 연결과 쪽지만 쓰는 연결은 서로 다른 자리다.
   const dmOnly = m.dmOnly === true; // 쪽지만 쓰는 사람은 호스트가 될 수 없고, 방을 연 것으로 치지도 않는다
+  const wasEmpty = !roomCount(); // (끊겨서 남은 자리도 사람으로 센다: 돌아온 사람은 방을 연 것이 아니다)
+  const olds = [...room.clients.values()].filter((c) => c !== ws && c.cid === m.cid && !!c.dmOnly === dmOnly);
+  const stale = olds.find((c) => c.ghost) || olds[0];
+  for (const o of olds) {
+    dropLive(o); clearGhostTimers(o); room.clients.delete(o.id);
+    if (o !== stale && !o.dmOnly) broadcast({ t: 'user-leave', id: o.id, quiet: true });
+    if (!o.ghost) { send(o, { t: 'replaced' }); o.final = true; o.close(); }
+  }
   if (acct?.role !== 'admin' && isBanned(ip, m.cid, acct?.id)) { // 관리자는 밴 대상이 아니다
     send(ws, { t: 'banned' });
     return ws.close();
@@ -473,8 +507,10 @@ function join(ws, m, ip) {
   if (acct) messages.remember(ws);
   if (!dmOnly && !room.yt && room.queue.length) advance(); // 모두 나간 뒤 남은 대기열이 있으면 첫 입장자부터 이어서 재생
   sendJoined(ws, token2 ? { token: token2 } : {});
+  if (!dmOnly) chatlog.touch(ws.cid); // sendJoined 가 놓친 채팅을 고른 뒤에 '이 기기가 방에 있었다'고 기록한다 (처음이면 이 시점부터가 처음)
   room.clients.set(ws.id, ws);
   if (!dmOnly) broadcast({ t: 'user-join', user: userOf(ws), back: !!stale }, ws);
+  if (!dmOnly && wasEmpty) roomOpened(ws);
 }
 
 function ban(ws, m) {
@@ -503,9 +539,10 @@ wss.on('connection', (ws, req) => {
     console.log(`[연결 끊김] ${ws.name} code=${code}${reason?.length ? ` 사유=${String(reason).slice(0, 60)}` : ''} ${Math.round((Date.now() - ws.joinedAt) / 1000)}초 접속`); // 원인 추적용 (1006 = 비정상 끊김, 4000번대 = 화면 쪽이 스스로 끊음 + 사유)
     if (ws.final || closing) return leave(ws);
     ws.ghost = true; ws.visible = false; ws.ghostAt = Date.now();
+    if (!ws.dmOnly) chatlog.touch(ws.cid);
     if (ws.host) ws.hostTimer = setTimeout(ensureHost, HOST_AWAY_MS + 50); // 호스트가 돌아오지 않으면 대기열을 아무도 못 만지지 않게
-    const grace = graceOf(ws);
-    ws.ghostTimer = setTimeout(() => leave(ws), grace);
+    const grace = ws.host ? Math.max(graceOf(ws), HOST_AWAY_MS + 1000) : graceOf(ws); // 호스트는 탭을 닫거나 새로고침해도 HOST_AWAY_MS 동안은 자리를 지킨다
+    ws.ghostTimer = setTimeout(() => leave(ws, true), grace);
     if (grace > LIVE_HOLD_MS) ws.holdTimer = setTimeout(() => dropLive(ws), LIVE_HOLD_MS);
     if (!ws.dmOnly) ws.awayTimer = setTimeout(() => { ws.away = true; broadcast({ t: 'user-away', id: ws.id, away: true }, ws); }, Math.min(AWAY_MS, grace));
   });
@@ -517,9 +554,9 @@ wss.on('connection', (ws, req) => {
     if (!m || typeof m !== 'object') return; // 'null' 같은 프레임을 보내면 m.t에서 예외가 나 서버 전체가 꺼졌었다
     if (m.t === 'join') return !ws.joined && join(ws, m, ip);
     if (!ws.joined) return;
-    if (ws.dmOnly && m.t !== 'bye' && m.t !== 'ping') { messages.handle(ws, m); return; } // 쪽지만 쓰는 연결은 방 기능(채팅·영상·음성·공유·관리)을 쓸 수 없다
+    if (ws.dmOnly && m.t !== 'bye' && m.t !== 'ping' && m.t !== 'profile') { messages.handle(ws, m); return; } // 쪽지만 쓰는 연결은 방 기능(채팅·영상·음성·공유·관리)을 쓸 수 없다
     switch (m.t) {
-      case 'bye': ws.final = true; leave(ws); ws.close(); break; // 탭을 닫는 등 일부러 나가는 것: 유예 없이 바로 나간다
+      case 'bye': if (ws.host && !m.manual) { ws.close(); break; } ws.final = true; leave(ws); ws.close(); break; // 호스트는 탭을 닫거나 새로고침해도 바로 넘기지 않고 끊김처럼 기다린다. 설정의 "방 나가기"(manual)는 바로 나간다 // 탭을 닫는 등 일부러 나가는 것: 유예 없이 바로 나간다
       case 'ping': send(ws, { t: 'pong' }); break; // 앱이 직접 보내는 생존 신호 (프록시/모바일 절전에서 죽은 연결을 알아내려고)
       case 'chat': {
         const text = String(m.text || '').trim().slice(0, 500);
@@ -527,7 +564,8 @@ wss.on('connection', (ws, req) => {
         const now = Date.now();
         if ((!text && !media) || now - (ws.lastChat || 0) < 300) return; // 도배 방지
         ws.lastChat = now;
-        broadcast({ t: 'chat', id: ws.id, name: ws.name, text, media: media || undefined, ts: now });
+        const e = chatlog.add({ id: ws.id, name: ws.name, uid: ws.uid || undefined, color: ws.color || undefined, text, media: media || undefined, ts: now, cid: ws.cid });
+        broadcast({ t: 'chat', seq: e.seq, id: e.id, name: e.name, uid: e.uid, color: e.color, text, media: e.media, ts: now });
         break;
       }
       case 'queue-add':
@@ -556,6 +594,28 @@ wss.on('connection', (ws, req) => {
           for (const c of clientsOfAcct(a.id)) { c.final = true; send(c, { t: 'banned' }); c.close(); }
           save(); sendBans();
         } else { room.bans = room.bans.filter((b) => !(b.type === 'acct' && b.value === a.id)); save(); sendBans(); }
+        break;
+      }
+      case 'profile': { // 설정에서 프로필(사진·색)을 바꿨다: 같은 계정의 모든 기기, 참가자 목록, 채팅 말풍선, 쪽지 화면이 바로 새 모습으로 바뀐다. 닉네임과 달리 횟수 제한은 없다
+        const av = cleanAvatar(m.avatar), co = cleanColor(m.color);
+        if ((!av && !co) || Date.now() - (ws.lastProfile || 0) < 1000) return;
+        ws.lastProfile = Date.now();
+        const a = ws.acct && accounts.byId(ws.acct), mine = a ? clientsOfAcct(a.id) : [ws];
+        if (a) { if (av) a.avatar = av; if (co) a.color = co; }
+        for (const c of mine) { if (av) c.avatar = av; if (co) c.color = co; if (!c.dmOnly) broadcast({ t: 'user-update', user: userOf(c) }); }
+        if (a) { messages.remember(ws); sendAll({ t: 'profile', uid: a.id, av: room.members[a.id]?.av }); }
+        break;
+      }
+      case 'guest-rename': { // 게스트가 방 안에서 닉네임을 바꾼다 (계정은 /auth/rename: 7일에 한 번). 게스트는 방을 나갔다 다른 이름으로 들어올 수도 있어서 도배만 막는다
+        if (ws.acct) return;
+        const name = cleanName(m.name), key = name && nameKey(name), fail = (msg) => send(ws, { t: 'rename-result', ok: false, msg });
+        if (Date.now() - (ws.lastRename || 0) < 30000) return fail('닉네임은 30초에 한 번만 바꿀 수 있어요.');
+        if (!name) return fail('닉네임에는 한글, 영문, 숫자, 공백, _ - . 만 쓸 수 있어요.');
+        if (name === ws.name) return fail('지금 쓰는 닉네임과 같아요.');
+        if (!accounts.nameFree(key) || [...room.clients.values()].some((c) => c !== ws && c.joined && c.cid !== ws.cid && nameKey(c.name) === key)) return fail('이미 쓰고 있는 닉네임이에요.');
+        ws.name = name; ws.lastRename = Date.now();
+        broadcast({ t: 'user-update', user: userOf(ws) }); broadcast({ t: 'guest-renamed', id: ws.id, name });
+        send(ws, { t: 'rename-result', ok: true, name });
         break;
       }
       case 'host-give': { // 호스트(또는 관리자)가 다른 사람에게 호스트를 넘긴다

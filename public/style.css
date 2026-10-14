@@ -259,6 +259,8 @@ button.urow:hover{background:var(--surface-2)}
 .dlg-h h2{margin:0;font:400 22px/1.3 var(--display)}
 .dlg-b{overflow:auto;padding:4px 20px 24px;display:grid;gap:8px;overscroll-behavior:contain}
 
+.emoji { width: 1.25em; height: 1.25em; vertical-align: -0.25em; display: inline-block; }
+.emoji-btn .emoji, #emojis .emoji { width: 1.6em; height: 1.6em; vertical-align: middle; }
 /* 의미색 버튼: 시작·켜기 = 초록(음성)/파랑(공유), 끄기·나가기·중지 = 빨강. 색만으로 구분하지 않도록 아이콘·글자도 같이 바뀐다 */
 .btn.go,.btn.blue,.btn.stop{font-weight:600}
 .btn.go{background:var(--ok);border-color:var(--ok);color:var(--on-ok)}
@@ -704,3 +706,113 @@ html.has-bg body{background:transparent}
 
 /* 휴대폰 가로: 새 버전 띠가 오른쪽 패널의 탭을 가리지 않게 영상 쪽에 띄운다 (원래 #upd 규칙보다 뒤에 와야 한다) */
 @media (max-width:960px) and (orientation:landscape){#upd{left:calc((100% - var(--side-w,320px)) / 2);max-width:calc(100% - var(--side-w,320px) - 24px)}}
+
+/* ===== 글 꾸미기(마크다운)와 링크 카드 ===== */
+.bubble p + p,.bubble p + blockquote,.bubble blockquote + p,.bubble p + pre{margin-top:4px}
+.bubble blockquote{margin:2px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--muted);overflow-wrap:anywhere;white-space:pre-wrap;font-size:var(--chat-fs,16px)}
+.bubble pre.cb{margin:4px 0;padding:8px 10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:auto;max-height:240px;font-size:calc(var(--chat-fs,16px) - 2px);white-space:pre}
+.bubble pre.cb code,.bubble code.ic{font-family:ui-monospace,SFMono-Regular,Consolas,"Noto Sans Mono CJK KR",monospace}
+.bubble code.ic{padding:1px 5px;background:var(--surface);border:1px solid var(--line);border-radius:5px;font-size:.92em}
+.bubble .lnk{color:var(--accent-text,var(--accent));text-decoration:underline;overflow-wrap:anywhere;word-break:break-all}
+.spoiler{background:var(--text);color:transparent;border-radius:4px;cursor:pointer;padding:0 2px}
+.spoiler:not(.shown) *{opacity:0}
+.spoiler:not(.shown) a{pointer-events:none}
+.spoiler.shown{background:var(--surface-2);color:inherit;cursor:auto}
+.spoiler:focus-visible{outline:3px solid var(--focus)}
+.embed{display:flex;gap:10px;align-items:center;margin-top:6px;max-width:min(100%,360px);padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.embed .eb-th img{display:block;width:96px;height:54px;object-fit:cover;border-radius:8px;background:#000}
+.embed .eb-b{display:grid;gap:6px;min-width:0;justify-items:start}
+.embed .eb-b small{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.ytadd{display:none}
+body.is-host .ytadd{display:inline-flex}
+
+/* ===== 영상 소리(내 기기에서만) ===== */
+.ytvol{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:2px 2px}
+.ytvol .ytv-r{flex:1 1 140px;min-width:120px;display:flex}
+.ytvol .ytv-r input{flex:1;min-width:0}
+.ytvol output{min-width:4ch;text-align:right;font-variant-numeric:tabular-nums;font-size:14px;color:var(--muted)}
+.ytvol .ytv-note{color:var(--muted);font-size:14px}
+
+/* ===== 음성 칩을 누르면 뜨는 소리 크기 창 ===== */
+.vp.clk{cursor:pointer;transition:border-color .12s,background .12s}
+.vp.clk:hover{border-color:var(--accent)}
+.vp.clk:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.vpop{position:fixed;z-index:50;display:grid;gap:8px;width:min(280px,calc(100vw - 16px));padding:12px 14px;background:var(--surface);border:1.5px solid var(--line);border-radius:var(--r-box);box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.vpop b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ===== 설정: 프로필 페이지, 약관 읽기 ===== */
+.prof-top{display:flex;align-items:center;gap:16px;margin-bottom:8px}
+.prof-top .av.xl{flex:none}
+#profMake .make{margin-bottom:12px}
+.doc-dlg{width:min(760px,calc(100vw - 16px))}
+.doc-b{display:block;line-height:1.7;overflow-wrap:anywhere}
+.doc-b h2,.doc-b h3,.doc-b h4,.doc-b h5{margin:1.4em 0 .5em;line-height:1.35}
+.doc-b h2{font-size:22px}.doc-b h3{font-size:18px}.doc-b h4,.doc-b h5{font-size:16px}
+.doc-b p{margin:.6em 0}
+.doc-b ul,.doc-b ol{margin:.6em 0;padding-left:1.4em}
+.doc-b blockquote{margin:.6em 0;padding:2px 12px;border-left:3px solid var(--line);color:var(--muted)}
+.doc-b code{padding:1px 5px;background:var(--surface-2);border-radius:5px;font-size:.92em}
+.doc-b .md-tw{overflow-x:auto;margin:.8em 0}
+.doc-b table{border-collapse:collapse;min-width:100%;font-size:14px}
+.doc-b th,.doc-b td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+.doc-b th{background:var(--surface-2);white-space:nowrap}
+.doc-b a{color:var(--accent-text,var(--accent))}
+
+/* ===== 앱 로고 위장 ===== */
+.logo img.logo-img{width:28px;height:28px;border-radius:6px;object-fit:cover;flex:none}
+#logoPrev{display:flex;align-items:center;gap:12px;min-height:44px}
+#logoPrev svg,#logoPrev img{width:28px;height:28px;flex:none;color:var(--accent-text);border-radius:6px}
+#logoPrev div{display:grid;gap:2px}
+#logoPrev span{font-size:14px;color:var(--muted)}
+/* 폰: 소리 조절을 영상 왼쪽 위에 겹쳐 둔다 (세로 공간을 쓰지 않음) */
+.ytvol.ovl{position:absolute;left:8px;top:8px;z-index:5;flex-wrap:nowrap;gap:6px;padding:4px 10px 4px 4px;border-radius:var(--r-pill);background:rgba(0,0,0,.62);color:#fff;max-width:calc(100% - 16px)}
+.ytvol.ovl .btn{background:transparent;border-color:transparent;color:#fff}
+.ytvol.ovl #ytMuteLbl,.ytvol.ovl .ytv-note,.ytvol.ovl output{display:none}
+.ytvol.ovl .ytv-r{flex:0 1 120px;min-width:72px}
+.ytvol.ovl .ytv-r input{accent-color:#fff}
+
+/* ===== 쪽지 수정 ===== */
+.dm-edit{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.dm-edit-in{flex:1 1 160px;min-width:0;min-height:44px;padding:8px 10px;border:1.5px solid var(--line);border-radius:var(--r-ctl);background:var(--bg);color:var(--text);font:inherit}
+.dm-edit-in:focus-visible{outline:3px solid var(--focus);outline-offset:1px}
+
+/* ===== X(트위터)·인스타그램 카드 ===== */
+.embed.x,.embed.ig{display:grid;gap:8px;align-items:start;max-width:min(100%,420px);min-width:0}
+.embed .eb-load{color:var(--muted)}
+.embed.x .xh{display:flex;align-items:center;gap:10px;min-width:0}
+.embed.x .xa{width:36px;height:36px;border-radius:50%;object-fit:cover;flex:none;background:var(--surface-2)}
+.embed.x .xn{display:grid;min-width:0}
+.embed.x .xn b,.embed.x .xn small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.embed.x .xn small,.embed.x .xf small{color:var(--muted)}
+.embed.x .xt{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--chat-fs,16px)}
+.embed.x .xt a{color:var(--accent-text,var(--accent));word-break:break-all}
+.embed.x .xm{display:grid;gap:3px;border-radius:12px;overflow:hidden}
+.embed.x .xm.n2,.embed.x .xm.n3,.embed.x .xm.n4{grid-template-columns:1fr 1fr}
+.embed.x .xm img{display:block;width:100%;height:100%;max-height:320px;object-fit:cover;background:var(--surface-2)}
+.embed.x .xm.n1 img{max-height:420px;object-fit:contain}
+.embed.x .xvw{border-radius:12px;overflow:hidden;background:#000}
+.embed.x .xv{display:block;width:100%;max-height:420px;background:#000}
+.embed.x .xq{display:grid;gap:2px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;color:inherit;text-decoration:none}
+.embed.x .xq small{color:var(--muted)}
+.embed.x .xq span{overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.embed.x .xf{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+.embed .xo{color:var(--accent-text,var(--accent))}
+.embed.ig .row{display:flex;gap:8px;flex-wrap:wrap}
+.embed.ig.on{padding:0;overflow:hidden;background:transparent}
+.embed.ig .igf{display:block;width:100%;min-width:260px;height:560px;border:0;background:#fff;border-radius:12px}
+
+/* ===== 방 열림 알리기(호스트) ===== */
+.host-only{display:none}
+body.is-host .host-only{display:flex}
+.share-room{align-items:center;gap:10px;flex-wrap:wrap;padding:8px 2px 12px}
+.share-room small{color:var(--muted);flex:1 1 200px}
+/* ===== 설정 프로필 페이지 바로잡기 ===== */
+/* 화면 낭독용 숨김 글자(.sr)는 위치를 절대값으로 잡아서, 안쪽 칸이 기준이 아니면 창 전체(.dlg)가 따라 스크롤된다 → 스크롤 칸 자체를 기준으로 */
+.dlg-b,.set-pane{position:relative}
+/* 설정 안의 이모티콘 목록은 입장 화면용 안쪽 스크롤 없이 설정 페이지 스크롤 하나만 쓴다 */
+#profMake .emojis{max-height:none;overflow:visible}
+/* 이모티콘 그림은 버튼 한가운데에: 버튼의 기본 안쪽 여백이 그림 자리를 먹지 않게 하고, 그림은 버튼보다 작게 */
+.emojis button{padding:0;display:grid;place-items:center}
+.emojis button .emoji{width:30px;height:30px;vertical-align:baseline}
+#emojis button .emoji{width:30px;height:30px;vertical-align:baseline}
+.prof-top .av.xl{width:96px;height:96px;font-size:40px}

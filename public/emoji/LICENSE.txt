@@ -1,0 +1,32 @@
+MIT License
+
+Copyright (c) 2023 Samuel Kopp
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+----------------------------------------------------------------------
+Twemoji 그림의 출처 표기 (CC-BY 4.0)
+
+이 폴더의 이모티콘 그림은 Twemoji 입니다.
+Copyright 2020 Twitter, Inc and other contributors (jdecked/twemoji 포크, 버전 15.0).
+그림은 Creative Commons Attribution 4.0 International (CC-BY 4.0) 라이선스로 쓰고 있습니다.
+https://creativecommons.org/licenses/by/4.0/
+원본: https://github.com/jdecked/twemoji
+SVG 묶음(패키지): @twemoji/svg 15.0.0 (MIT, boywithkeyboard/twemoji_svg)

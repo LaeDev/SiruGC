@@ -6,3 +6,5 @@ tmp/
 config.env
 uploads/
 state.json.bak-*
+state-chat.json
+*-chat.json

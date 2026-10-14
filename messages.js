@@ -28,7 +28,8 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
 
   const convKey = (a, b) => [a, b].sort().join('~');
   const clientsOf = (uid) => [...room.clients.values()].filter((c) => c.uid === uid);
-  const pub = ({ id, from, to, enc, ts, read }) => ({ id, from, to, enc, ts, read: !!read });
+  const pub = ({ id, from, to, enc, ts, read, edited }) => ({ id, from, to, enc, ts, read: !!read, edited: edited || undefined });
+  const encOk = (enc) => !!enc && typeof enc === 'object' && [enc.s, enc.r, enc.iv, enc.ct].every((x) => typeof x === 'string' && B64.test(x.replace(/-/g, '+').replace(/_/g, '/'))) && enc.iv.length === 16 && enc.ct.length <= MAX_CT && enc.s.length <= 32 && enc.r.length <= 32;
   const curKey = (uid) => (room.keys[uid] || []).at(-1);
   const clearedAt = (uid, peer) => room.cleared[uid + '>' + peer] || 0;
   // uid가 볼 수 있는 쪽지: 대화를 정리한 시각 이후이고, 차단 때문에 내게 전달되지 않은(drop) 쪽지가 아닌 것
@@ -37,13 +38,14 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
   const peerInfo = (uid) => {
     const m = room.members[uid];
     const k = curKey(uid);
-    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, deleted: m?.deleted || undefined, prev: m?.prev || '', kid: k?.kid, pub: k?.pub, online: clientsOf(uid).some((c) => !c.ghost) }; // 방금 끊겨서 돌아오기를 기다리는 사람(ghost)은 접속 중으로 치지 않는다
+    return { uid, name: m?.name || '알 수 없음', color: m?.color || null, av: m?.av, deleted: m?.deleted || undefined, prev: m?.prev || '', kid: k?.kid, pub: k?.pub, online: clientsOf(uid).some((c) => !c.ghost) }; // 방금 끊겨서 돌아오기를 기다리는 사람(ghost)은 접속 중으로 치지 않는다
   };
 
   // 접속할 때 알려 둔다: 이름·프사·색을 기억해 두면 오프라인인 사람에게도 쪽지를 보낼 수 있다.
   function remember(ws) {
     if (!ws.uid) return; // 게스트는 쪽지를 쓰지 않으니 목록에 두지 않는다
-    room.members[ws.uid] = { name: ws.name, prev: ws.prev || '', avatar: ws.avatar, color: ws.color, seen: Date.now() };
+    const old = room.members[ws.uid]; // av: 프사가 바뀔 때마다 달라지는 번호 (쪽지 화면이 옛 그림을 기억해 두지 않게 주소에 붙인다)
+    room.members[ws.uid] = { name: ws.name, prev: ws.prev || '', avatar: ws.avatar, color: ws.color, seen: Date.now(), av: old && old.avatar === ws.avatar ? old.av : Date.now() };
     const uids = Object.keys(room.members);
     if (uids.length > MAX_MEMBERS) { // 쪽지 기록이 없는 가장 오래된 사람부터 잊는다
       const hasDm = new Set(Object.keys(room.dms).flatMap((k) => k.split('~')));
@@ -100,6 +102,17 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
     for (const s of room.subs[uid] || []) if (s.prefs.dm) pushOne(uid, s, payloadFor(s.prefs.spoof, fromName, '', fromUid));
   }
 
+  // 방이 열렸을 때(빈 방에 첫 사람이 들어옴): "방이 열리면 알려 주기"를 켠 기기에만 알림. 지금 방에 있는 사람, 연 사람 본인은 빼고, 알림 위장을 켠 기기에는 위장된 알림을 보낸다
+  function openPayload(prefs) {
+    const sp = SPOOFS[prefs.spoof];
+    return sp?.title ? { title: sp.title, body: sp.body, icon: sp.icon, tag: 'n' } : { title: '시루 그룹챗', body: '방이 열렸어요. 같이 들어와 볼까요?', tag: 'room-open' };
+  }
+  function pushOpen(openerUid) {
+    for (const [uid, subs] of Object.entries(room.subs)) {
+      if (uid === openerUid || clientsOf(uid).some((c) => !c.ghost && !c.dmOnly)) continue;
+      for (const s of subs) if (s.prefs.open) pushOne(uid, s, openPayload(s.prefs));
+    }
+  }
   function addSub(ws, m) {
     const s = m.sub;
     if (!s || typeof s.endpoint !== 'string' || s.endpoint.length > 600 || !s.keys?.p256dh || !s.keys?.auth) return;
@@ -107,7 +120,7 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
       let u; try { u = new URL(s.endpoint); } catch { return; }
       if (u.protocol !== 'https:' || !PUSH_HOST_OK.test(u.hostname)) return;
     }
-    const prefs = { dm: m.prefs?.dm !== false, spoof: SPOOFS[m.prefs?.spoof] ? m.prefs.spoof : 'off' };
+    const prefs = { dm: m.prefs?.dm !== false, spoof: SPOOFS[m.prefs?.spoof] ? m.prefs.spoof : 'off', open: m.prefs?.open === true };
     const list = (room.subs[ws.uid] ||= []);
     const keys = { p256dh: String(s.keys.p256dh).slice(0, 200), auth: String(s.keys.auth).slice(0, 100) };
     const ex = list.find((x) => x.endpoint === s.endpoint);
@@ -120,8 +133,7 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
   // ---- 쪽지 ----
   function sendDm(ws, m) {
     const to = String(m.to || ''), now = Date.now(), enc = m.enc;
-    const okEnc = enc && typeof enc === 'object' && [enc.s, enc.r, enc.iv, enc.ct].every((x) => typeof x === 'string' && B64.test(x.replace(/-/g, '+').replace(/_/g, '/'))) && enc.iv.length === 16 && enc.ct.length <= MAX_CT && enc.s.length <= 32 && enc.r.length <= 32;
-    if (!okEnc) return send(ws, { t: 'dm-error', msg: '쪽지는 암호화해서만 보낼 수 있어요. 새로고침한 뒤 다시 보내 주세요.' }); // 평문 쪽지는 받지 않는다
+    if (!encOk(enc)) return send(ws, { t: 'dm-error', msg: '쪽지는 암호화해서만 보낼 수 있어요. 새로고침한 뒤 다시 보내 주세요.' }); // 평문 쪽지는 받지 않는다
     if (to === ws.uid || !room.members[to] || now - (ws.lastDm || 0) < 400) return; // 나에게, 모르는 사람, 도배
     if (room.members[to].deleted) return send(ws, { t: 'dm-error', msg: '탈퇴한 사용자에게는 쪽지를 보낼 수 없어요.' });
     if (blocksOf(ws.uid).includes(to)) return send(ws, { t: 'dm-error', msg: '차단한 사람에게는 쪽지를 보낼 수 없어요. 차단을 풀어 주세요.' });
@@ -184,6 +196,22 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
         }
         return true;
       }
+      case 'dm-edit': { // 내가 보낸 쪽지의 글을 고친다: 보내는 기기가 새로 암호화한 내용으로 바꿔치는 것이라 서버는 여전히 내용을 모르고, 이전 내용은 남지 않는다. 사진·동영상 쪽지는 화면에서 막는다
+        const peer = String(m.with || ''), x = (room.dms[convKey(ws.uid, peer)] || []).find((y) => y.id === m.id && y.from === ws.uid), enc = m.enc, now = Date.now();
+        if (!x || now - (ws.lastDmEdit || 0) < 400) return true;
+        if (!encOk(enc)) return send(ws, { t: 'dm-error', msg: '쪽지는 암호화해서만 고칠 수 있어요. 새로고침한 뒤 다시 해 주세요.' }), true;
+        const mine = curKey(ws.uid), theirs = curKey(peer);
+        if (room.members[peer]?.deleted) return send(ws, { t: 'dm-error', msg: '탈퇴한 사용자에게 보낸 쪽지는 고칠 수 없어요.' }), true;
+        if (!mine || !theirs || enc.s !== mine.kid || enc.r !== theirs.kid) return send(ws, { t: 'dm-error', msg: '보안 키가 바뀌어서 고치지 못했어요. 새로고침한 뒤 다시 해 주세요.' }), true;
+        ws.lastDmEdit = now;
+        Object.assign(x, { enc: { s: enc.s, r: enc.r, iv: enc.iv, ct: enc.ct }, edited: now });
+        saveSoon();
+        for (const c of room.clients.values()) {
+          if (c.uid === ws.uid) send(c, { t: 'dm-edited', id: x.id, with: peer, enc: x.enc, edited: now });
+          else if (c.uid === peer && !x.drop) send(c, { t: 'dm-edited', id: x.id, with: ws.uid, enc: x.enc, edited: now }); // 상대가 나를 차단했으면 전달하지 않는다
+        }
+        return true;
+      }
       case 'dm-clear': { // 대화 정리: 내 화면에서만 지운다 (상대는 그대로)
         const peer = String(m.with || '');
         room.cleared[ws.uid + '>' + peer] = Date.now();
@@ -231,5 +259,5 @@ module.exports = function createMessages({ room, send, newId, saveSoon, cleanMed
 
   prune();
   setInterval(prune, 3600e3).unref();
-  return { SPOOFS, remember, forget, inboxFor, blocksOf, handle, avatarOf, peerInfo };
+  return { SPOOFS, remember, forget, inboxFor, blocksOf, handle, avatarOf, peerInfo, pushOpen };
 };

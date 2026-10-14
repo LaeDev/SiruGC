@@ -128,7 +128,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     console.log('PC (1280px): 게스트');
     const D = await page(1280, 860, false, '?step=profile'); await D.open(); await D.enter('설정게스트');
     await D.tap('#settingsBtn');
-    check(JSON.stringify(await D.tabs()) === JSON.stringify(['화면', '음성', '숨기기', '계정', '앱 설치·정보']), '게스트에게는 알림 분류가 빠져 있음');
+    check(JSON.stringify(await D.tabs()) === JSON.stringify(['화면', '프로필', '음성', '숨기기', '계정', '앱 설치·정보']), '게스트에게는 알림 분류가 빠져 있음 (프로필은 방에 들어온 뒤라 보임)');
     check(await D.js(`(() => { const n = document.querySelector('#setNav').getBoundingClientRect(), p = document.querySelector('#setPane').getBoundingClientRect(); return n.right <= p.left + 1 && n.width >= 180 && getComputedStyle(document.querySelector('#setBack')).display === 'none'; })()`), '왼쪽에 분류 목록, 오른쪽에 내용 (← 버튼은 없음)');
     check(await D.js(`document.querySelector('#setNav [aria-current=page]').textContent.startsWith('화면') && document.querySelector('#setTitle').textContent === '설정'`), '처음에는 "화면"이 선택돼 있음');
     check(await D.js(`document.querySelectorAll('#themeGrid .tc').length === 18`), '테마가 18개 (기기 설정 따르기·나만의 테마 + 다크 9 + 라이트 7)');
@@ -162,7 +162,7 @@ const getJson = (url) => new Promise((ok, no) => http.get(url, (res) => { let d 
     const A = await signup(PORT, '설정회원');
     const U = await page(1280, 860, false, '?step=profile'); await U.open(); await U.js(loginJs(A)); await wait(400); await U.js(`document.querySelector('#joinForm').requestSubmit()`); await U.until(`joined`); await wait(600);
     await U.tap('#settingsBtn');
-    check(JSON.stringify(await U.tabs()) === JSON.stringify(['화면', '음성', '알림', '숨기기', '계정', '앱 설치·정보']), '로그인한 사람에게는 알림 분류도 보임');
+    check(JSON.stringify(await U.tabs()) === JSON.stringify(['화면', '프로필', '음성', '알림', '숨기기', '계정', '앱 설치·정보']), '로그인한 사람에게는 알림 분류도 보임');
     await U.tap('#setNav [data-cat=notif]'); await U.shot('3-notif-desktop');
     check(JSON.stringify(await U.visiblePages()) === '["notifSec"]', '알림 분류의 내용이 보임');
     await U.tap('#setNav [data-cat=acct]'); await U.shot('4-acct-desktop');

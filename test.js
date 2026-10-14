@@ -68,6 +68,7 @@ function client(cid, name, extra = {}, { host = 'localhost', headers, port = POR
     const peer = peerOverride || (await c.keyOf(to)) || { kid: '0000000000000000', pub: c.keys.pub }; // 모르는 사람이면 아무 키나 (서버가 걸러야 한다)
     c.send({ t: 'dm', to, enc: await encryptDm(me(), { uid: to, ...peer }, { t: String(text).trim().slice(0, 500), m: media }) });
   };
+  c.edit = async (to, id, text) => { const peer = await c.keyOf(to); c.send({ t: 'dm-edit', with: to, id, enc: await encryptDm(me(), { uid: to, ...peer }, { t: String(text).trim().slice(0, 500) }) }); };
   c.reveal = async (msg) => decryptDm(me(), msg, async (uid, kid) => (await c.keyOf(uid, kid)).pub);
   c.preview = (e) => c.reveal({ from: e.last.mine ? c.myUid() : e.uid, to: e.last.mine ? e.uid : c.myUid(), enc: e.last.enc }); // 쪽지 목록의 마지막 쪽지
   c.texts = (msgs) => Promise.all(msgs.map(async (m) => (await c.reveal(m)).t));
@@ -335,7 +336,7 @@ async function dmFullCheck() {
   x1.clear(); x1.send({ t: 'dm-history', with: x2.uid }); assert((await until(() => x1.find('dm-thread'), '기록')).msgs.length >= 2, '상대 화면의 기록은 그대로');
   await x1.dm(x2.uid, '정리 후'); await wait(500);
   x2.clear(); x2.send({ t: 'dm-history', with: x1.uid }); assert.deepEqual(await x2.texts((await until(() => x2.find('dm-thread'), '기록')).msgs), ['정리 후'], '정리한 뒤 온 쪽지만 보임');
-  const x2b = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2b.open; await wait(300);
+  const x2b = client('dmf-2b-cid-00001', '쪽지이', { acct: true }); await x2b.open; await wait(300);
   assert.equal((await x2b.preview(x2b.find('joined').inbox.find((c) => c.uid === x1.uid))).t, '정리 후', '다시 접속해도 정리가 유지되고 목록 미리보기는 새 쪽지');
   x2b.ws.close();
 
@@ -355,8 +356,29 @@ async function dmFullCheck() {
   x2.clear(); await x2.dm(x1.uid, '내가 차단한 사람에게'); assert((await until(() => x2.find('dm-error'), '오류')).msg.includes('차단'), '내가 차단한 사람에게는 보낼 수 없고 이유를 알려 줌');
   x2.send({ t: 'dm-block', uid: x1.uid, on: false }); await until(() => x2.last('blocks')?.list.length === 0, '차단 해제'); x1.clear(); x2.clear(); await wait(450);
   await x1.dm(x2.uid, '해제 뒤'); await until(() => x2.find('dm'), '차단을 풀면 다시 도착함');
-  const x2c = client('dmf-2-cid-000001', '쪽지이', { acct: true }); await x2c.open; await wait(300);
+  const x2c = client('dmf-2c-cid-00001', '쪽지이', { acct: true }); await x2c.open; await wait(300);
   assert.deepEqual(x2c.find('joined').blocks, [], '입장할 때 차단 목록을 받음');
+  // 수정: 내가 보낸 쪽지만, 새로 암호화한 내용으로 (이전 내용은 남지 않음)
+  x1.clear(); x2.clear(); x2c.clear(); await wait(450);
+  await x1.dm(x2.uid, '고치기 전'); const toEdit = (await until(() => x2.find('dm'), '고칠 쪽지 도착')).msg; await wait(450);
+  x1.clear(); x2.clear();
+  await x2.edit(x1.uid, toEdit.id, '남의 쪽지를 고침'); await wait(400);
+  assert(!x1.find('dm-edited') && !x2.find('dm-edited'), '남이 보낸 쪽지는 고칠 수 없음');
+  await x1.edit(x2.uid, 'ffffffffffff', '없는 쪽지'); await wait(450);
+  assert(!x1.find('dm-edited'), '없는 쪽지는 무시');
+  x1.send({ t: 'dm-edit', with: x2.uid, id: toEdit.id, text: '평문으로 고침' }); await wait(450); x1.send({ t: 'dm-edit', with: x2.uid, id: toEdit.id, enc: { s: 'x', r: 'y', iv: 'AAAAAAAAAAAAAAAA', ct: 'A'.repeat(20000) } }); await wait(500);
+  assert.equal(x1.msgs.filter((m) => m.t === 'dm-error').length, 2, '암호화하지 않았거나 너무 큰 수정은 서버가 받지 않음');
+  assert(!x2.find('dm-edited'), '그런 수정은 상대에게 가지 않음');
+  await wait(450); await x1.edit(x2.uid, toEdit.id, '  고친 뒤  ');
+  const ed = await until(() => x2.find('dm-edited'), '고친 쪽지가 상대에게 옴');
+  assert.equal((await x2.reveal({ from: x1.uid, to: x2.uid, enc: ed.enc })).t, '고친 뒤', '상대 기기에서 새 내용으로 풀림');
+  assert(ed.id === toEdit.id && ed.with === x1.uid && ed.edited > toEdit.ts, '같은 쪽지에 수정 시각이 붙음');
+  assert(x1.find('dm-edited') && x1.find('dm-edited').with === x2.uid, '보낸 사람의 다른 화면에도 알림');
+  assert(!JSON.stringify(ed).includes('고친'), '서버가 보낸 수정에도 내용이 평문으로 들어 있지 않음');
+  x2.clear(); x2.send({ t: 'dm-history', with: x1.uid });
+  const hist = (await until(() => x2.find('dm-thread'), '기록')).msgs.find((m) => m.id === toEdit.id);
+  assert.equal((await x2.reveal(hist)).t, '고친 뒤', '기록에도 새 내용(이전 내용은 없음)'); assert(hist.edited, '기록에 수정됨 표시');
+  await wait(500); assert(!fs.readFileSync(STATE, 'utf8').includes('고친'), '저장 파일에도 평문이 없음');
   x2.send({ t: 'dm-block', uid: 'ffffffffffff', on: true }); x2.send({ t: 'dm-block', uid: x2.uid, on: true }); await wait(300);
   assert(!x2.msgs.some((m) => m.t === 'blocks' && m.list.includes('ffffffffffff')) && !x2.msgs.some((m) => m.t === 'blocks' && m.list.includes(x2.uid)), '모르는 사람이나 나 자신은 차단할 수 없음');
   for (const c of [x1, x2, x2c]) c.send({ t: 'bye' }); // 유예 없이 바로 정리해서 뒤의 점검에 퇴장 알림이 섞이지 않게
@@ -570,14 +592,14 @@ async function hostCheck() {
     // 방이 비면 호스트도, 대기열 추가 권한도 처음으로
     A.send({ t: 'queue-grant', id: bj.me.id, on: true }); await wait(200);
     for (const x of [A, B, D2]) x.send({ t: 'bye' });
-    await wait(600);
+    await wait(3200); // 호스트가 탭을 닫으면(bye) HOST_AWAY_MS 동안은 자리를 지키므로, 그 유예가 지나 방이 완전히 빌 때까지 기다린다
     const E = cl('ho-e-000000001', '차카타'); await E.open; await wait(250);
     const F = cl('ho-b-000000001', '라마바'); await F.open; await wait(250);
     assert(E.find('joined').me.host && !F.find('joined').me.host && !F.find('joined').me.canQueue, '방이 비었다가 다시 열리면 먼저 들어온 사람이 호스트이고 대기열 권한은 초기화됨');
     F.send({ t: 'queue-add', videoId: V3 }); await wait(300);
     assert(F.find('queue-denied'), '초기화된 권한으로는 올릴 수 없음');
     for (const x of [E, F]) x.send({ t: 'bye' });
-    await wait(600);
+    await wait(3200);
 
     // 쪽지만 쓰는 사람은 방이 비어 있어도 호스트가 되지 않는다
     const G = cl('ho-g-000000001', '파하가', { acct: true, dmOnly: true }); await G.open; await wait(250);
@@ -589,6 +611,43 @@ async function hostCheck() {
 }
 
 // 계정·로그인: 가입 코드, 잠금, 토큰 순환과 도난 감지, 닉네임 변경·예약, 비밀번호 변경, 삭제, 관리자, 계정 관리, 게스트 제한. 타이머를 줄인 서버를 따로 띄운다
+// 방 열림 알림: 빈 방에 첫 사람이 들어오면 푸시와 웹훅이 한 번 가고, 5분(여기서는 짧게) 안에 다시 열려도 가지 않는다
+async function roomOpenCheck() {
+  const port = PORT + 850;
+  const env = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: STATE + '.open', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/`,
+    ROOM_OPEN_WEBHOOK: `http://127.0.0.1:${PORT + 300}/hook`, ROOM_URL: 'https://room.example.test', ROOM_OPEN_COOLDOWN_MS: '3000', RESUME_GRACE_MS: '300', RESUME_GRACE_MOBILE_MS: '300', HOST_AWAY_MS: '300' }; // (호스트가 탭을 닫으면 HOST_AWAY_MS+1초 동안 자리를 지키므로, 그 시간을 짧게 해서 방이 금방 비게 한다)
+  const sv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env, stdio: 'ignore' });
+  const cl = (cid, name, extra) => client(cid, name, extra, { port });
+  try {
+    await wait(1200);
+    const sub = (n) => ({ endpoint: 'https://push.example.test/open' + n, keys: { p256dh: 'p'.repeat(20), auth: 'a'.repeat(10) } });
+    const A = cl('ro-a-000000001', '열림알림', { acct: true }); await A.open; await wait(300);
+    const Z = cl('ro-z-000000001', '끈사람', { acct: true }); await Z.open; await wait(300);
+    A.send({ t: 'push-sub', sub: sub(1), prefs: { dm: false, spoof: 'off', open: true } }); await until(() => A.find('push-ok'), '켠 기기 구독');
+    Z.send({ t: 'push-sub', sub: sub(2), prefs: { dm: false, spoof: 'off' } }); await until(() => Z.find('push-ok'), '끈 기기 구독');
+    A.send({ t: 'bye' }); Z.send({ t: 'bye' }); await wait(3600); // (처음 입장도 방 열림이라 5분 규칙이 시작된다: 그 시간이 지나고 방이 비도록 기다린다)
+    sink.hits.length = 0;
+    const B = cl('ro-b-000000001', '여는사람'); await B.open; await wait(700);
+    const push1 = sink.hits.filter((h) => h.payload && h.endpoint?.includes('open1')), hook1 = sink.hits.filter((h) => h.event === 'room-open');
+    assert.equal(push1.length, 1, '방이 열리면 "방이 열리면 알려 주기"를 켠 기기에 푸시가 감');
+    assert(push1[0].payload.title === '시루 그룹챗' && push1[0].payload.body.includes('방이 열렸어요') && !JSON.stringify(push1[0]).includes('여는사람'), '알림에는 누가 열었는지가 들어가지 않음');
+    assert(!sink.hits.some((h) => h.endpoint?.includes('open2')), '끈 기기에는 가지 않음');
+    assert.equal(hook1.length, 1, '웹훅이 한 번 감');
+    assert(hook1[0].text.includes('방이 열렸어요') && hook1[0].url === 'https://room.example.test' && hook1[0].content === hook1[0].text && !JSON.stringify(hook1[0]).includes('여는사람'), '웹훅 내용: 문구·주소 (디스코드·슬랙 호환 text/content), 누가 열었는지는 없음');
+    B.send({ t: 'bye' }); await wait(1600); sink.hits.length = 0;
+    const B2 = cl('ro-b-000000001', '여는사람'); await B2.open; await wait(700);
+    assert(!sink.hits.some((h) => h.event === 'room-open' || h.endpoint?.includes('open1')), '같은 방이 바로 다시 열려도(5분 규칙) 알리지 않음');
+    B2.send({ t: 'bye' }); await wait(3800); sink.hits.length = 0;
+    const A3 = cl('ro-a-000000001', '열림알림', { acct: true, dmOnly: true }); await A3.open; await wait(300); sink.hits.length = 0; // 쪽지만 쓰는 연결은 방에 있는 것이 아니다
+    const C = cl('ro-c-000000001', '다시여는사람'); await C.open; await wait(700);
+    assert(sink.hits.some((h) => h.endpoint?.includes('open1')), '쪽지만 쓰는 연결로 접속해 있어도(방에 있는 것이 아니라서) 방이 열리면 알림이 감');
+    A3.send({ t: 'bye' }); C.send({ t: 'bye' }); await wait(3800); sink.hits.length = 0;
+    const D = cl('ro-d-000000001', '쪽지만', { acct: true, dmOnly: true }); await D.open; await wait(700);
+    assert(!sink.hits.some((h) => h.event === 'room-open'), '쪽지만 쓰는 연결은 방을 연 것이 아님');
+    D.send({ t: 'bye' });
+  } finally { sv.kill(); fs.rmSync(STATE + '.open', { force: true }); }
+}
+
 async function accountCheck() {
   const port = PORT + 900;
   const env = { ...process.env, ...AUTH_ENV, PORT: String(port), STATE_FILE: STATE + '.acct', CONFIG_FILE: path.join(os.tmpdir(), 'no-such-config.env'), SIGNUP_PER_HOUR: '40',
@@ -598,7 +657,7 @@ async function accountCheck() {
   const signup = (name, extra = {}) => post('/auth/signup', { name, password: pwOf(name), code: 'test-code', ...extra });
   const live = []; let n = 0;
   const cl = async (extra = {}, name) => { const c = client('ac-cid-' + String(++n).padStart(7, '0'), name || '접속' + n, extra, O); live.push(c); await c.open; await wait(250); return c; };
-  const bye = async () => { for (const c of live.splice(0)) if (c.ws.readyState === 1) c.send({ t: 'bye' }); await wait(500); };
+  const bye = async () => { for (const c of live.splice(0)) if (c.ws.readyState === 1) c.send({ t: 'bye' }); await wait(2800); }; // (호스트가 bye 를 보내도 HOST_AWAY_MS+1초는 자리를 지키므로 그 유예가 지나길 기다린다)
   const raw = (reqOpts, body) => new Promise((ok) => { const rq = http.request({ host: '127.0.0.1', port, ...reqOpts }, (res) => { let d = ''; res.on('data', (x) => (d += x)); res.on('end', () => ok({ status: res.statusCode, body: d })); }); rq.end(body); });
   try {
     await wait(1500);
@@ -1092,5 +1151,11 @@ async function configCheck() {
 
 sinkServer.listen(PORT + 300, '127.0.0.1');
 const srv = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, ...AUTH_ENV, PORT, STATE_FILE: STATE, CONFIG_FILE: require('path').join(require('os').tmpdir(), 'no-such-config.env'), RESUME_GRACE_MS: '1500', RESUME_GRACE_MOBILE_MS: '4500', AWAY_MS: '500', UPLOAD_DIR: path.join(os.tmpdir(), 'up-main-' + Date.now()), UPLOAD_MAX_IMAGE_MB: '1', UPLOAD_MAX_VIDEO_MB: '1', UPLOAD_USER_MB_PER_HOUR: '2', TURN_URL: 'turn:turn.example.com:3478', TURN_SECRET: 'test-secret', PUSH_DEBUG_URL: `http://127.0.0.1:${PORT + 300}/` }, stdio: 'ignore' });
-wait(1000).then(main).then(dmFullCheck).then(e2eeCheck).then(nameCheck).then(dmOnlyCheck).then(hostCheck).then(accountCheck).then(migrationCheck).then(proxyCheck).then(graceCheck).then(resumeCheck).then(uploadCheck).then(purgeCheck).then(configCheck).then(() => console.log('OK'), (e) => { console.error(e); process.exitCode = 1; })
+// ONLY=hostCheck,roomOpenCheck 처럼 이름을 주면 그 구간만 돌린다 (고치는 중에 빨리 확인하려고)
+const STEPS = { main, dmFullCheck, e2eeCheck, nameCheck, dmOnlyCheck, hostCheck, roomOpenCheck, accountCheck, migrationCheck, proxyCheck, graceCheck, resumeCheck, uploadCheck, purgeCheck, configCheck };
+(async () => {
+  await wait(1000);
+  for (const [n, f] of Object.entries(STEPS)) if (!process.env.ONLY || process.env.ONLY.split(',').includes(n)) await f();
+  console.log('OK');
+})().catch((e) => { console.error(e); process.exitCode = 1; })
   .finally(() => { sinkServer.close(); srv.kill(); fs.rmSync(STATE, { force: true }); process.exit(); });

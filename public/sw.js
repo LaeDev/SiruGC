@@ -3,7 +3,7 @@
 const BUILD = '__BUILD__'; // 서버가 sw.js 를 내려 줄 때 화면 버전으로 바꿔 준다
 const CACHE = 'siru-shell-' + BUILD;
 const SHELL = [
-  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/e2ee.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/tour.js', '/layout.js',
+  '/', '/style.css', '/themes.css', '/app.js', '/auth.js', '/media.js', '/voice.js', '/settings.js', '/pwa.js', '/e2ee.js', '/dm.js', '/notify.js', '/panic.js', '/attach.js', '/tour.js', '/layout.js', '/emoji.js', '/rich.js', '/embed.js', '/logo.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];
 
@@ -28,7 +28,7 @@ const fallback = async (res) => (await caches.match('/')) || res || Response.err
 self.addEventListener('fetch', (e) => {
   const req = e.request, url = new URL(req.url);
   // 같은 사이트의 GET만. /healthz는 반드시 실제 서버에 물어야 하므로 가로채지 않는다.
-  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname === '/healthz' || url.pathname.startsWith('/f/')) return; // 올린 사진·동영상은 용량이 크고 Range 요청이 필요해서 가로채지 않는다
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname === '/healthz' || url.pathname.startsWith('/f/') || url.pathname.startsWith('/emoji/')) return; // 올린 사진·동영상은 용량이 크고 Range 요청이 필요해서 가로채지 않는다
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then((res) => (res.status >= 500 ? fallback(res) : res)).catch(() => fallback()));
     return;
